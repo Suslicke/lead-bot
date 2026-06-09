@@ -55,11 +55,17 @@ def item_to_fields(item: dict, link: str) -> dict:
     """Shape a /items/byid result like the LLM's output dict (labels, not option VALUEs)."""
     fields: dict = {"name": item.get("name") or "Unnamed", "source": "2GIS", "language": ["RU"],
                     "niche": _niche(item.get("rubrics")), "prospectLink": link}
+    # 2GIS reviews block uses general_* (this branch) with org_* as a fallback; review_count is
+    # text reviews, *_with_stars is ratings. Prefer the branch-level text-review count.
     rev = item.get("reviews") or {}
-    if rev.get("rating") is not None:
-        fields["rating"] = rev["rating"]
-    if rev.get("review_count") is not None:
-        fields["reviewsCount"] = rev["review_count"]
+    rating = rev.get("general_rating")
+    rating = rating if rating is not None else rev.get("org_rating")
+    if rating is not None:
+        fields["rating"] = rating
+    count = (rev.get("general_review_count") or rev.get("general_review_count_with_stars")
+             or rev.get("org_review_count"))
+    if count:
+        fields["reviewsCount"] = count
     addr = item.get("full_address_name") or (item.get("address") or {}).get("name")
     if addr:
         fields["addressText"] = addr
