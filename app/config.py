@@ -18,6 +18,7 @@ class Settings:
     twenty_api_key: str
     tz: ZoneInfo
     config_path: Path
+    usage_path: Path                         # LLM usage counters (sits next to config_path)
     llm_provider: str = "anthropic"          # cloudflare | aigateway | anthropic
     anthropic_api_key: str | None = None     # required only if provider=anthropic
     cf_account_id: str | None = None         # cloudflare + aigateway
@@ -44,6 +45,7 @@ class Settings:
         model = os.environ.get("MODEL") or default_model
         if provider == "cloudflare" and not model.startswith("@cf/"):
             model = default_model  # ignore a stale non-CF MODEL when on Workers AI direct
+        config_path = Path(os.environ.get("CONFIG_PATH", "/app/data/config.json"))
         return Settings(
             bot_token=os.environ["TELEGRAM_BOT_TOKEN"],
             allowed_ids=ids,
@@ -52,7 +54,8 @@ class Settings:
             twenty_public_url=os.environ.get("TWENTY_PUBLIC_URL", "https://crm.suslicketeam.com").rstrip("/"),
             twenty_api_key=os.environ["TWENTY_API_KEY"],
             tz=ZoneInfo(os.environ.get("TZ", "Asia/Almaty")),
-            config_path=Path(os.environ.get("CONFIG_PATH", "/app/data/config.json")),
+            config_path=config_path,
+            usage_path=config_path.parent / "usage.json",
             llm_provider=provider,
             anthropic_api_key=os.environ.get("ANTHROPIC_API_KEY") or None,
             cf_account_id=os.environ.get("CLOUDFLARE_ACCOUNT_ID") or None,
@@ -65,7 +68,15 @@ class Settings:
         )
 
 
-_DEFAULTS = {"kpi_goal": 10, "digest_times": ["09:00", "19:00"]}
+# llm_max_* are per-user, per-day caps (0 = unlimited). Defaults are generous
+# backstops against runaway loops/abuse — the Workers AI free tier (~10k Neurons/day)
+# is far above normal manual capture, so these rarely bite in practice.
+_DEFAULTS = {
+    "kpi_goal": 10,
+    "digest_times": ["09:00", "19:00"],
+    "llm_max_requests": 200,
+    "llm_max_tokens": 300_000,
+}
 
 
 class ConfigStore:
@@ -107,4 +118,20 @@ class ConfigStore:
 
     def clear_digests(self) -> None:
         self._data["digest_times"] = []
+        self._save()
+
+    @property
+    def llm_max_requests(self) -> int:
+        return int(self._data["llm_max_requests"])
+
+    def set_llm_max_requests(self, value: int) -> None:
+        self._data["llm_max_requests"] = max(0, int(value))
+        self._save()
+
+    @property
+    def llm_max_tokens(self) -> int:
+        return int(self._data["llm_max_tokens"])
+
+    def set_llm_max_tokens(self, value: int) -> None:
+        self._data["llm_max_tokens"] = max(0, int(value))
         self._save()

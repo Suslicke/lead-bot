@@ -29,24 +29,27 @@ Layered; one aiogram **Router per feature**; dependencies built once in `main.py
 ```
 app/
   main.py        entrypoint — build deps, inject, wire routers (whitelist on each), start
-  config.py      Settings (from env) + ConfigStore (runtime JSON: KPI goal, digest times)
+  config.py      Settings (from env) + ConfigStore (runtime JSON: KPI goal, digest times, LLM caps)
+  usage.py       UsageStore — per-user/day LLM token+request counters (data/usage.json)
   twenty.py      TwentyClient (REST records + Metadata-API options) + field/value maps + to_payload
-  llm.py         Extractor protocol + OpenAICompat/Anthropic extractors + provider registry + schema_with_options
+  llm.py         Extractor protocol + OpenAICompat/Anthropic extractors (return Extraction: fields + Usage) + provider registry + schema_with_options
   reference.py   OptionsRegistry — live niche/source Select options cached from Twenty
   stats.py       StatsService — pipeline counts, KPI (new prospects today), digest text
   scheduler.py   DigestScheduler (APScheduler, reschedulable at runtime)
   filters.py     Whitelist (applied per router)
   keyboards.py   confirm_kb / dup_kb
   timeutil.py    today-bounds (Asia/Almaty), ISO parse, progress bar
-  handlers/      common · capture · queries · kpi · digest · reference
+  handlers/      common · capture · queries · kpi · digest · reference · usage
 ```
 
 - **capture.py** is the core flow: text → `extractor.extract` (in a thread) → `to_payload`
   → **dedup** by `prospectLink` (then exact name) → preview with `confirm_kb` or `dup_kb`
   → callbacks `create:` / `update:` / `cancel:`. **Update refreshes facts only**
   (`_REFRESHABLE`: niche, hasWebsite, city, contact, prospectLink, addressText, reviewsCount,
-  rating) — it must NOT touch `stage`/`nextStep`/`notes` (the user's pipeline work).
-- Commands: `/today` `/pipeline` `/leads <stage>` `/kpi [set N]` `/digest [list|add HH:MM|remove HH:MM|off]` `/niche [add <name>]` `/source [add <name>]` `/settings` `/start` `/help`.
+  rating, language) — it must NOT touch `stage`/`nextStep`/`notes` (the user's pipeline work).
+  Before spending a call it checks the **per-user daily LLM cap** (`usage.over_limit`) and hard-stops;
+  after a successful extract it records the call's token usage.
+- Commands: `/today` `/pipeline` `/leads <stage>` `/kpi [set N]` `/digest [list|add HH:MM|remove HH:MM|off]` `/niche [add <name>]` `/source [add <name>]` `/usage` `/llm set req|tok <n>` `/settings` `/start` `/help`.
 
 ### Dynamic niche/source options (`app/reference.py` + Metadata API)
 
@@ -80,14 +83,35 @@ Both OpenAI-compat providers use `response_format: json_schema`; `_loads` tolera
 string content (Workers AI returns a dict). Extraction has a **60s timeout + 1 retry** on
 transient errors. `SCHEMA` in `llm.py` is the single source for extracted fields.
 
+### LLM usage accounting & limits (`app/usage.py` + caps in `ConfigStore`)
+
+`extract()` returns an **`Extraction(fields, usage)`** dataclass — token counts (`prompt`/
+`completion`, from the provider's `usage` block, which was previously discarded) travel *with*
+the result rather than living on the extractor, so concurrent aiogram updates can't race over a
+shared slot. `UsageStore` accumulates **per-user, per-day** counters in `data/usage.json` (keyed
+by local-tz calendar day → resets at local midnight; trimmed to 30 days). `capture` calls
+`usage.over_limit(uid, req_cap, tok_cap)` **before** the call and hard-stops if over; it records
+usage **after** a successful extract.
+
+- Caps are **per user, per day**, live in `ConfigStore` (`llm_max_requests` / `llm_max_tokens`,
+  defaults 200 / 300k, **`0` = unlimited**) — set via **`/llm set req|tok <n>`**, shown in
+  `/usage` and `/settings`. They're a **backstop** against runaway loops/abuse, not a daily gate:
+  the Workers AI free tier (~10k Neurons/day) is far above normal manual capture.
+- `over_limit` uses `>=` checked pre-call, so a cap of N lets exactly N calls through. Failed
+  extractions (exception) are NOT recorded.
+
 ## Twenty integration (`app/twenty.py`)
 
 - REST: `POST/GET/PATCH /rest/leads`. Auth = Bearer **bot's own API key** (`TWENTY_API_KEY`).
 - **Field/value mapping** (label → option VALUE) and `STAGE_*` live here — keep in sync with
-  the Lead object in Twenty (15 fields). **Reserved names:** `Link`→`prospectLink`,
+  the Lead object in Twenty (16 fields). **Reserved names:** `Link`→`prospectLink`,
   `Address`→`addressText`. Select payloads use the option **value** (e.g. `"CONTACTED"`).
 - `to_payload` maps an extracted dict → a `/rest/leads` body; numbers (`reviewsCount`,
   `rating`) are included even when 0.
+- **`language` is a MULTI_SELECT** (`RU`/`KK`/`EN` — a lead can speak several) the LLM detects
+  from the business name / note / city (SYSTEM prompt). `_languages()` sanitises its guess into
+  a valid list (tolerates a bare string / lowercase / unknown), always defaulting to `["RU"]`,
+  so the REST payload is a list. `twenty.LANGUAGES` is the source set. Field id `41f2a057-…`.
 
 ## CI/CD
 

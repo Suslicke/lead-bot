@@ -6,18 +6,45 @@ from __future__ import annotations
 
 import copy
 import json
+from dataclasses import dataclass, field
 from typing import Callable, Protocol
 
 import httpx
 
-from .twenty import HAS_WEBSITE, NICHE, SOURCE
+from .twenty import HAS_WEBSITE, LANGUAGES, NICHE, SOURCE
+
+
+@dataclass
+class Usage:
+    """Token counts reported by the provider for a single extraction."""
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+
+    @property
+    def total_tokens(self) -> int:
+        return self.prompt_tokens + self.completion_tokens
+
+
+@dataclass
+class Extraction:
+    """Result of one extract() call: the parsed lead fields + the call's token usage.
+
+    Usage travels with the result (not stored on the extractor) so concurrent
+    aiogram updates can't race over a shared 'last usage' slot.
+    """
+    fields: dict
+    usage: Usage = field(default_factory=Usage)
+
 
 SYSTEM = (
     "Extract a sales lead from the user's short note about a local business. "
     "Put each fact in its OWN field; default city to Almaty and source to 2GIS. "
     "'notes' is ONLY for extra context with no dedicated field (e.g. 'no site, all on "
     "Instagram', 'high foot traffic'). Never repeat reviews, rating, address, contact, "
-    "or the link in 'notes' — leave 'notes' empty if there is nothing extra."
+    "or the link in 'notes' — leave 'notes' empty if there is nothing extra. "
+    "Set 'language' to the language(s) you'd actually message this business in (RU/KK/EN) — "
+    "infer from the business name, the note's language and the city; in Almaty it's usually "
+    "RU, add KK for a clearly Kazakh brand, EN only for an international one. It can be several."
 )
 
 # Shared JSON schema for the extracted fields (used as Anthropic tool input_schema
@@ -38,6 +65,8 @@ SCHEMA = {
         "nextStep": {"type": "string", "description": "Suggested first action"},
         "reviewsCount": {"type": "integer", "description": "Number of reviews, e.g. 1300 from '1300+ отзывов'"},
         "rating": {"type": "number", "description": "Average rating 0-5, e.g. 4.7"},
+        "language": {"type": "array", "items": {"type": "string", "enum": list(LANGUAGES)},
+                     "description": "Language(s) to communicate with this business in; default ['RU'], can be several"},
     },
     "required": ["name", "niche", "hasWebsite", "source"],
 }
@@ -58,7 +87,7 @@ def schema_with_options(niche: list[str], source: list[str]) -> dict:
 
 
 class Extractor(Protocol):
-    def extract(self, text: str, schema: dict | None = None) -> dict: ...
+    def extract(self, text: str, schema: dict | None = None) -> "Extraction": ...
 
 
 def _loads(content) -> dict:
@@ -86,16 +115,18 @@ class AnthropicExtractor:
         self._client = Anthropic(api_key=api_key)
         self._model = model
 
-    def extract(self, text: str, schema: dict | None = None) -> dict:
+    def extract(self, text: str, schema: dict | None = None) -> Extraction:
         tool = {"name": "save_lead", "description": SYSTEM, "input_schema": schema or SCHEMA}
         resp = self._client.messages.create(
             model=self._model, max_tokens=600, tools=[tool],
             tool_choice={"type": "tool", "name": "save_lead"},
             messages=[{"role": "user", "content": text}],
         )
+        usage = Usage(getattr(resp.usage, "input_tokens", 0) or 0,
+                      getattr(resp.usage, "output_tokens", 0) or 0)
         for block in resp.content:
             if block.type == "tool_use" and block.name == "save_lead":
-                return dict(block.input)
+                return Extraction(dict(block.input), usage)
         raise ValueError("model did not return a save_lead tool call")
 
 
@@ -120,7 +151,7 @@ class OpenAICompatExtractor:
         if aig_token:  # AI Gateway auth (required for stored-keys / authenticated gateway)
             self._headers["cf-aig-authorization"] = f"Bearer {aig_token}"
 
-    def extract(self, text: str, schema: dict | None = None) -> dict:
+    def extract(self, text: str, schema: dict | None = None) -> Extraction:
         body = {
             "model": self._model,
             "messages": [{"role": "system", "content": SYSTEM}, {"role": "user", "content": text}],
@@ -133,7 +164,10 @@ class OpenAICompatExtractor:
             try:
                 r = httpx.post(self._url, headers=self._headers, json=body, timeout=self._timeout)
                 r.raise_for_status()
-                return _loads(r.json()["choices"][0]["message"]["content"])
+                j = r.json()
+                u = j.get("usage") or {}
+                usage = Usage(u.get("prompt_tokens", 0) or 0, u.get("completion_tokens", 0) or 0)
+                return Extraction(_loads(j["choices"][0]["message"]["content"]), usage)
             except (httpx.TimeoutException, httpx.TransportError) as e:
                 last = e
         raise last  # type: ignore[misc]

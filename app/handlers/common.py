@@ -17,6 +17,7 @@ HELP = (
     "/digest — send now · /digest list · /digest add 09:00 · /digest remove 19:00 · /digest off\n"
     "/niche — list niches · /niche add &lt;name&gt; — new niche (LLM picks it up)\n"
     "/source — list sources · /source add &lt;name&gt;\n"
+    "/usage — LLM tokens/requests today · /llm set req|tok &lt;n&gt; — daily caps\n"
     "/settings — show config"
 )
 

@@ -16,7 +16,8 @@ async def settings_cmd(message: Message, config: ConfigStore, settings: Settings
     await message.answer(
         f"<b>Settings</b>\n"
         f"KPI goal: {config.kpi_goal} new prospects/day\n"
-        f"Digest times ({settings.tz.key}): {', '.join(config.digest_times) or 'off'}"
+        f"Digest times ({settings.tz.key}): {', '.join(config.digest_times) or 'off'}\n"
+        f"LLM caps/user/day: {config.llm_max_requests or '∞'} req · {config.llm_max_tokens or '∞'} tokens"
     )
 
 

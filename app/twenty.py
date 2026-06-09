@@ -17,6 +17,8 @@ NICHE = {"Cafe": "CAFE", "Beauty": "BEAUTY", "Gaming club": "GAMING_CLUB",
 HAS_WEBSITE = {"No": "NO", "Weak": "WEAK", "Yes": "YES"}
 SOURCE = {"2GIS": "TWO_GIS", "Site": "SITE", "Instagram": "INSTAGRAM",
           "Referral": "REFERRAL", "Event": "EVENT", "Shirt": "SHIRT"}
+# language is a MULTI_SELECT on the Lead object — a lead can speak several (RU + KK).
+LANGUAGES = ("RU", "KK", "EN")
 
 STAGE_ORDER = ["TO_CONTACT", "CONTACTED", "REPLIED", "QUALIFIED", "PROPOSAL", "WON", "LOST"]
 STAGE_LABEL = {"TO_CONTACT": "To contact", "CONTACTED": "Contacted", "REPLIED": "Replied",
@@ -63,6 +65,21 @@ def _option_value(label: str, taken: set[str]) -> str:
     return value
 
 
+def _languages(value) -> list[str]:
+    """Sanitise the LLM's language guess into a valid MULTI_SELECT list (default ['RU']).
+
+    Tolerates a bare string ('RU'), lowercase ('ru'), and unknown values; keeps order,
+    de-dupes, and always returns at least ['RU'] so the field is never empty.
+    """
+    raw = [value] if isinstance(value, str) else list(value or [])
+    out: list[str] = []
+    for v in raw:
+        up = str(v).strip().upper()
+        if up in LANGUAGES and up not in out:
+            out.append(up)
+    return out or ["RU"]
+
+
 def to_payload(fields: dict, niche_map: dict | None = None, source_map: dict | None = None) -> dict:
     """Map an extracted-fields dict to a Twenty /rest/leads body (drop empty values).
 
@@ -78,6 +95,7 @@ def to_payload(fields: dict, niche_map: dict | None = None, source_map: dict | N
         "niche": niche_map.get(fields.get("niche"), "OTHER"),
         "hasWebsite": HAS_WEBSITE.get(fields.get("hasWebsite"), "NO"),
         "source": source_map.get(fields.get("source"), "TWO_GIS"),
+        "language": _languages(fields.get("language")),
     }
     for key in ("contact", "prospectLink", "addressText", "notes", "nextStep"):
         if fields.get(key):

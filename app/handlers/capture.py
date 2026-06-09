@@ -13,11 +13,12 @@ import uuid
 from aiogram import F, Router
 from aiogram.types import CallbackQuery, Message
 
-from ..config import Settings
+from ..config import ConfigStore, Settings
 from ..keyboards import confirm_kb, dup_kb
 from ..llm import Extractor, schema_with_options
 from ..reference import OptionsRegistry
 from ..twenty import TwentyClient, to_payload
+from ..usage import UsageStore
 
 log = logging.getLogger(__name__)
 router = Router()
@@ -27,13 +28,13 @@ _pending: dict[str, dict] = {}
 
 # fields a re-scan may refresh on an existing lead (facts, not pipeline state)
 _REFRESHABLE = ("niche", "hasWebsite", "city", "contact", "prospectLink",
-                "addressText", "reviewsCount", "rating")
+                "addressText", "reviewsCount", "rating", "language")
 
 
 def _preview(p: dict) -> str:
     return (
         f"<b>{p['name']}</b>\n"
-        f"Niche: {p['niche']}   City: {p['city']}\n"
+        f"Niche: {p['niche']}   City: {p['city']}   Lang: {', '.join(p.get('language') or ['—'])}\n"
         f"Has website: {p['hasWebsite']}   Source: {p['source']}\n"
         f"Reviews: {p.get('reviewsCount', '—')}   Rating: {p.get('rating', '—')}\n"
         f"Address: {p.get('addressText', '—')}\n"
@@ -65,12 +66,21 @@ def find_duplicate(leads: list[dict], payload: dict) -> dict | None:
 
 @router.message(F.text & ~F.text.startswith("/"))
 async def capture(message: Message, extractor: Extractor, twenty: TwentyClient,
-                  options: OptionsRegistry) -> None:
+                  options: OptionsRegistry, config: ConfigStore, usage: UsageStore) -> None:
+    uid = message.from_user.id
+    over = usage.over_limit(uid, config.llm_max_requests, config.llm_max_tokens)
+    if over:  # hard stop before spending another LLM call
+        await message.answer(
+            f"🚫 Daily LLM limit reached ({over}). Resets at local midnight.\n"
+            "See /usage · raise with /llm set req &lt;n&gt; or /llm set tok &lt;n&gt;."
+        )
+        return
     note = await message.answer("⏳ Reading…")
     try:
         schema = schema_with_options(options.labels("niche"), options.labels("source"))
-        fields = await asyncio.to_thread(extractor.extract, message.text, schema)
-        payload = to_payload(fields, options.value_map("niche"), options.value_map("source"))
+        result = await asyncio.to_thread(extractor.extract, message.text, schema)
+        usage.record(uid, result.usage.prompt_tokens, result.usage.completion_tokens)
+        payload = to_payload(result.fields, options.value_map("niche"), options.value_map("source"))
     except Exception as e:  # noqa: BLE001
         log.exception("extract failed")
         await note.edit_text(f"⚠️ Couldn't parse that ({e}). Add the name + niche explicitly.")

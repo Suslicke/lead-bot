@@ -15,6 +15,7 @@ from .reference import OptionsRegistry
 from .scheduler import DigestScheduler
 from .stats import StatsService
 from .twenty import TwentyClient
+from .usage import UsageStore
 
 log = logging.getLogger("lead-bot")
 
@@ -33,6 +34,7 @@ async def main() -> None:
 
     # --- build dependencies ---
     config = ConfigStore(settings.config_path)
+    usage = UsageStore(settings.usage_path, settings.tz)
     twenty = TwentyClient(settings.twenty_api_url, settings.twenty_api_key)
     extractor = build_extractor(settings)
     stats = StatsService(twenty, config, settings.tz)
@@ -45,6 +47,7 @@ async def main() -> None:
     dp = Dispatcher()
     dp["settings"] = settings
     dp["config"] = config
+    dp["usage"] = usage
     dp["twenty"] = twenty
     dp["extractor"] = extractor
     dp["stats"] = stats
