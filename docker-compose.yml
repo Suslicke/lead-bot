@@ -1,0 +1,13 @@
+name: lead-bot
+
+services:
+  lead-bot:
+    image: ghcr.io/suslicke/lead-bot:latest
+    pull_policy: always
+    env_file: .env
+    # host network so the bot reaches Twenty at 127.0.0.1:4000 (never exposed publicly).
+    # The bot opens no ports — Telegram long-polling (outbound only).
+    network_mode: host
+    volumes:
+      - ./data:/app/data   # persists config.json (KPI goal + digest times)
+    restart: always
