@@ -30,14 +30,15 @@ Layered; one aiogram **Router per feature**; dependencies built once in `main.py
 app/
   main.py        entrypoint — build deps, inject, wire routers (whitelist on each), start
   config.py      Settings (from env) + ConfigStore (runtime JSON: KPI goal, digest times)
-  twenty.py      TwentyClient (REST create/all/update) + Lead field/value mappings + to_payload
-  llm.py         Extractor protocol + OpenAICompatExtractor/AnthropicExtractor + provider registry
+  twenty.py      TwentyClient (REST records + Metadata-API options) + field/value maps + to_payload
+  llm.py         Extractor protocol + OpenAICompat/Anthropic extractors + provider registry + schema_with_options
+  reference.py   OptionsRegistry — live niche/source Select options cached from Twenty
   stats.py       StatsService — pipeline counts, KPI (new prospects today), digest text
   scheduler.py   DigestScheduler (APScheduler, reschedulable at runtime)
   filters.py     Whitelist (applied per router)
   keyboards.py   confirm_kb / dup_kb
   timeutil.py    today-bounds (Asia/Almaty), ISO parse, progress bar
-  handlers/      common · capture · queries · kpi · digest
+  handlers/      common · capture · queries · kpi · digest · reference
 ```
 
 - **capture.py** is the core flow: text → `extractor.extract` (in a thread) → `to_payload`
@@ -45,7 +46,22 @@ app/
   → callbacks `create:` / `update:` / `cancel:`. **Update refreshes facts only**
   (`_REFRESHABLE`: niche, hasWebsite, city, contact, prospectLink, addressText, reviewsCount,
   rating) — it must NOT touch `stage`/`nextStep`/`notes` (the user's pipeline work).
-- Commands: `/today` `/pipeline` `/leads <stage>` `/kpi [set N]` `/digest [list|add HH:MM|remove HH:MM|off]` `/settings` `/start` `/help`.
+- Commands: `/today` `/pipeline` `/leads <stage>` `/kpi [set N]` `/digest [list|add HH:MM|remove HH:MM|off]` `/niche [add <name>]` `/source [add <name>]` `/settings` `/start` `/help`.
+
+### Dynamic niche/source options (`app/reference.py` + Metadata API)
+
+Niche/source are Twenty **Select** fields. Their options are NOT hardcoded at runtime — `OptionsRegistry`
+reads them off the Lead object via the **Metadata API** (`POST /metadata` GraphQL) at startup and after
+each `/niche add`, and feeds them to **both** coupling points: `schema_with_options()` (the enum the LLM may
+pick) and `to_payload()` (label → option VALUE). `twenty.NICHE`/`SOURCE` remain as a **seed/fallback** so a
+metadata hiccup degrades to old behaviour instead of mapping everything to OTHER.
+
+- `/niche add <name>` calls `updateOneField` which **replaces the whole options array** → the bot must send
+  back the live options (each with its real `id`); it `refresh()`es first and refuses to mutate from the
+  un-synced seed (no ids), so it can't regenerate ids / orphan records. VALUE is derived `_option_value()`
+  (ASCII UPPER_SNAKE; **RU is transliterated** so `Барбершоп`→`BARBERSHOP`).
+- Verified live (query + add + restore) with the **bot's own** Twenty key — that key has metadata-write perms.
+  Known ids: Lead object `52b9769d-…-78f6ed3098f8`; `niche` field `5577b72c-…`, `source` `27af265a-…`.
 
 ## LLM providers (Strategy pattern — `app/llm.py`)
 

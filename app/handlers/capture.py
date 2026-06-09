@@ -15,7 +15,8 @@ from aiogram.types import CallbackQuery, Message
 
 from ..config import Settings
 from ..keyboards import confirm_kb, dup_kb
-from ..llm import Extractor
+from ..llm import Extractor, schema_with_options
+from ..reference import OptionsRegistry
 from ..twenty import TwentyClient, to_payload
 
 log = logging.getLogger(__name__)
@@ -63,10 +64,13 @@ def find_duplicate(leads: list[dict], payload: dict) -> dict | None:
 
 
 @router.message(F.text & ~F.text.startswith("/"))
-async def capture(message: Message, extractor: Extractor, twenty: TwentyClient) -> None:
+async def capture(message: Message, extractor: Extractor, twenty: TwentyClient,
+                  options: OptionsRegistry) -> None:
     note = await message.answer("⏳ Reading…")
     try:
-        payload = to_payload(await asyncio.to_thread(extractor.extract, message.text))
+        schema = schema_with_options(options.labels("niche"), options.labels("source"))
+        fields = await asyncio.to_thread(extractor.extract, message.text, schema)
+        payload = to_payload(fields, options.value_map("niche"), options.value_map("source"))
     except Exception as e:  # noqa: BLE001
         log.exception("extract failed")
         await note.edit_text(f"⚠️ Couldn't parse that ({e}). Add the name + niche explicitly.")

@@ -15,6 +15,8 @@ HELP = (
     "/leads &lt;stage&gt; — list (e.g. /leads replied)\n"
     "/kpi — progress · /kpi set 10 — daily goal\n"
     "/digest — send now · /digest list · /digest add 09:00 · /digest remove 19:00 · /digest off\n"
+    "/niche — list niches · /niche add &lt;name&gt; — new niche (LLM picks it up)\n"
+    "/source — list sources · /source add &lt;name&gt;\n"
     "/settings — show config"
 )
 

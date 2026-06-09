@@ -11,6 +11,7 @@ from .config import ConfigStore, Settings
 from .filters import Whitelist
 from .handlers import get_routers
 from .llm import build_extractor
+from .reference import OptionsRegistry
 from .scheduler import DigestScheduler
 from .stats import StatsService
 from .twenty import TwentyClient
@@ -35,6 +36,8 @@ async def main() -> None:
     twenty = TwentyClient(settings.twenty_api_url, settings.twenty_api_key)
     extractor = build_extractor(settings)
     stats = StatsService(twenty, config, settings.tz)
+    options = OptionsRegistry(twenty)
+    await options.refresh()  # seed niche/source from Twenty (best-effort; falls back to hardcoded)
     bot = Bot(token=settings.bot_token, default=DefaultBotProperties(parse_mode="HTML"))
     scheduler = DigestScheduler(settings.tz, config, stats, bot, settings.allowed_ids)
 
@@ -46,6 +49,7 @@ async def main() -> None:
     dp["extractor"] = extractor
     dp["stats"] = stats
     dp["scheduler"] = scheduler
+    dp["options"] = options
 
     whitelist = Whitelist(settings.allowed_ids)
     for router in get_routers():

@@ -4,6 +4,7 @@ Both return the same structured dict. Selected by Settings.llm_provider.
 """
 from __future__ import annotations
 
+import copy
 import json
 from typing import Callable, Protocol
 
@@ -42,8 +43,22 @@ SCHEMA = {
 }
 
 
+def schema_with_options(niche: list[str], source: list[str]) -> dict:
+    """SCHEMA with the niche/source enums swapped for the live options from the registry.
+
+    Empty lists leave the hardcoded enum in place (e.g. if a metadata refresh failed), so
+    the model always sees *some* valid vocabulary.
+    """
+    schema = copy.deepcopy(SCHEMA)
+    if niche:
+        schema["properties"]["niche"]["enum"] = niche
+    if source:
+        schema["properties"]["source"]["enum"] = source
+    return schema
+
+
 class Extractor(Protocol):
-    def extract(self, text: str) -> dict: ...
+    def extract(self, text: str, schema: dict | None = None) -> dict: ...
 
 
 def _loads(content) -> dict:
@@ -71,8 +86,8 @@ class AnthropicExtractor:
         self._client = Anthropic(api_key=api_key)
         self._model = model
 
-    def extract(self, text: str) -> dict:
-        tool = {"name": "save_lead", "description": SYSTEM, "input_schema": SCHEMA}
+    def extract(self, text: str, schema: dict | None = None) -> dict:
+        tool = {"name": "save_lead", "description": SYSTEM, "input_schema": schema or SCHEMA}
         resp = self._client.messages.create(
             model=self._model, max_tokens=600, tools=[tool],
             tool_choice={"type": "tool", "name": "save_lead"},
@@ -105,11 +120,12 @@ class OpenAICompatExtractor:
         if aig_token:  # AI Gateway auth (required for stored-keys / authenticated gateway)
             self._headers["cf-aig-authorization"] = f"Bearer {aig_token}"
 
-    def extract(self, text: str) -> dict:
+    def extract(self, text: str, schema: dict | None = None) -> dict:
         body = {
             "model": self._model,
             "messages": [{"role": "system", "content": SYSTEM}, {"role": "user", "content": text}],
-            "response_format": {"type": "json_schema", "json_schema": {"name": "lead", "schema": SCHEMA}},
+            "response_format": {"type": "json_schema",
+                                "json_schema": {"name": "lead", "schema": schema or SCHEMA}},
             "max_tokens": 600,
         }
         last: Exception | None = None
