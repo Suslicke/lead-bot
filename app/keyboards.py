@@ -5,20 +5,20 @@ from aiogram.types import (InlineKeyboardButton, InlineKeyboardMarkup,
                            KeyboardButton, ReplyKeyboardMarkup)
 
 from .draft import EDITABLE, action_mode, button_label, parse_ref
-from .twenty import LANGUAGES
+from .twenty import LANGUAGES, STAGE_LABEL, STAGE_ORDER
 
 # Bottom nav: label -> hub action. Tapping a reply button SENDS its label as text, so menu.py
 # intercepts these exact labels (before capture's catch-all) and dispatches to the same render.
 NAV = {
-    "📅 Today": "today", "📊 Pipeline": "pipeline", "➡️ Convert": "convert",
+    "📅 Today": "today", "🎯 KPI": "kpi", "📊 Pipeline": "pipeline", "➡️ Convert": "convert",
     "💱 Currency": "currency", "🏷 Niches": "niches", "📈 Usage": "usage", "❔ Help": "help",
 }
 
 
 def main_kb() -> ReplyKeyboardMarkup:
     """Persistent bottom panel with the most-used actions (typing still adds a lead)."""
-    rows = [["📅 Today", "📊 Pipeline"], ["➡️ Convert", "💱 Currency"],
-            ["🏷 Niches", "📈 Usage"], ["🌍 Harvest", "❔ Help"]]
+    rows = [["📅 Today", "🎯 KPI"], ["📊 Pipeline", "➡️ Convert"],
+            ["💱 Currency", "🏷 Niches"], ["🌍 Harvest", "📈 Usage"], ["❔ Help"]]
     return ReplyKeyboardMarkup(
         keyboard=[[KeyboardButton(text=t) for t in row] for row in rows],
         resize_keyboard=True, is_persistent=True,
@@ -119,6 +119,39 @@ def lang_kb(ref: str, payload: dict) -> InlineKeyboardMarkup:
         row,
         [InlineKeyboardButton(text="✅ Done", callback_data=f"ed:{ref}")],
     ])
+
+
+def kpi_kb(metric: str, goal: int) -> InlineKeyboardMarkup:
+    """KPI settings panel: pick the metric (✓ on current) + nudge the goal with ±."""
+    tick = lambda m: "✓ " if metric == m else ""  # noqa: E731
+    stage_on = "✓ " if metric.startswith("stage:") else ""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=f"{tick('created')}📊 New", callback_data="kpi:m:created"),
+         InlineKeyboardButton(text=f"{tick('worked')}✏️ Worked", callback_data="kpi:m:worked")],
+        [InlineKeyboardButton(text=f"{tick('won')}🏆 Won", callback_data="kpi:m:won"),
+         InlineKeyboardButton(text=f"{stage_on}🎯 Stage…", callback_data="kpi:stage")],
+        [InlineKeyboardButton(text="−5", callback_data="kpi:g:-5"),
+         InlineKeyboardButton(text="−1", callback_data="kpi:g:-1"),
+         InlineKeyboardButton(text=f"🎯 {goal}", callback_data="kpi:noop"),
+         InlineKeyboardButton(text="+1", callback_data="kpi:g:1"),
+         InlineKeyboardButton(text="+5", callback_data="kpi:g:5")],
+    ])
+
+
+def kpi_stage_kb(metric: str) -> InlineKeyboardMarkup:
+    """Sub-menu: pick which pipeline stage the KPI tracks (✓ on current)."""
+    cur = metric.split(":", 1)[1] if metric.startswith("stage:") else ("WON" if metric == "won" else "")
+    rows, pair = [], []
+    for v in STAGE_ORDER:
+        pair.append(InlineKeyboardButton(text=("✓ " if v == cur else "") + STAGE_LABEL[v],
+                                         callback_data=f"kpi:s:{v}"))
+        if len(pair) == 2:
+            rows.append(pair)
+            pair = []
+    if pair:
+        rows.append(pair)
+    rows.append([InlineKeyboardButton(text="⬅️ Back", callback_data="kpi:back")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def harvest_niche_kb(labels: list[str]) -> InlineKeyboardMarkup:

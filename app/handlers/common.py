@@ -19,7 +19,7 @@ HELP = (
     "/today — due follow-ups + KPI\n"
     "/pipeline — counts per stage\n"
     "/leads &lt;stage&gt; — list (e.g. /leads replied)\n"
-    "/kpi — progress · /kpi set 10 — goal · /kpi metric won — what it counts\n"
+    "/kpi — KPI panel (buttons: metric + goal) · /kpi set 10 · /kpi metric won\n"
     "/digest — send now · /digest list · /digest add 09:00 · /digest remove 19:00 · /digest off\n"
     "/niche — list niches · /niche add &lt;name&gt; — new niche (LLM picks it up)\n"
     "/source — list sources · /source add &lt;name&gt;\n"

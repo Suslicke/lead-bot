@@ -1,9 +1,12 @@
-"""/kpi — show progress, set the daily goal (/kpi set <n>) or the metric (/kpi metric <x>)."""
-from aiogram import Router
+"""/kpi — an interactive settings panel (pick metric, nudge the goal), plus text shortcuts
+`/kpi set <n>` and `/kpi metric <x>` for power users."""
+from aiogram import F, Router
+from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters import Command, CommandObject
-from aiogram.types import Message
+from aiogram.types import CallbackQuery, Message
 
 from ..config import ConfigStore
+from ..keyboards import kpi_kb, kpi_stage_kb
 from ..stats import StatsService
 from ..timeutil import progress_bar
 from ..twenty import STAGE_LABEL, STAGE_ORDER
@@ -34,11 +37,30 @@ def _canonical_metric(name: str) -> str | None:
     return None
 
 
+def panel_text(d: dict) -> str:
+    """Header for the KPI panel — built from StatsService.today_data()."""
+    return (f"🎯 <b>KPI</b> · {d['kpi_label']}: <b>{d['kpi_value']}/{d['goal']}</b>  "
+            f"{progress_bar(d['kpi_value'], d['goal'])}\n"
+            f"<i>Tap a metric · adjust the goal with ±.</i>")
+
+
+async def _show_panel(message: Message, stats: StatsService, config: ConfigStore) -> None:
+    d = await stats.today_data()
+    await message.answer(panel_text(d), reply_markup=kpi_kb(d["kpi_metric"], d["goal"]))
+
+
+async def _rerender(callback: CallbackQuery, stats: StatsService) -> None:
+    d = await stats.today_data()
+    try:
+        await callback.message.edit_text(panel_text(d), reply_markup=kpi_kb(d["kpi_metric"], d["goal"]))
+    except TelegramBadRequest:
+        pass  # "message is not modified" (e.g. goal already at the clamp) — ignore
+
+
 @router.message(Command("kpi"))
 async def kpi(message: Message, command: CommandObject,
               config: ConfigStore, stats: StatsService) -> None:
     arg = (command.args or "").strip()
-
     if arg.startswith("set"):
         try:
             config.set_kpi_goal(int(arg.split()[1]))
@@ -46,23 +68,55 @@ async def kpi(message: Message, command: CommandObject,
         except (IndexError, ValueError):
             await message.answer("Usage: <code>/kpi set 10</code>")
         return
-
     if arg.startswith("metric"):
         name = arg[len("metric"):].strip()
-        if not name:
-            await message.answer(_METRIC_HELP + f"\n\nNow: <b>{config.kpi_metric}</b>")
-            return
-        canonical = _canonical_metric(name)
-        if not canonical:
+        canonical = _canonical_metric(name) if name else None
+        if name and not canonical:
             await message.answer(f"⚠️ Unknown metric <code>{name}</code>.\n\n{_METRIC_HELP}")
             return
-        config.set_kpi_metric(canonical)
-        await message.answer(f"🎯 KPI metric → <b>{config.kpi_metric}</b>.")
+        if canonical:
+            config.set_kpi_metric(canonical)
+        await _show_panel(message, stats, config)
         return
+    await _show_panel(message, stats, config)  # no arg → interactive panel
 
-    d = await stats.today_data()
-    await message.answer(
-        f"🎯 <b>{d['kpi_label']}: {d['kpi_value']}/{d['goal']}</b>  "
-        f"{progress_bar(d['kpi_value'], d['goal'])}\n"
-        f"<i>metric: {d['kpi_metric']} · change: /kpi metric &lt;x&gt; · goal: /kpi set &lt;n&gt;</i>"
-    )
+
+# --- panel callbacks ---------------------------------------------------------
+@router.callback_query(F.data == "kpi:noop")
+async def kpi_noop(callback: CallbackQuery) -> None:
+    await callback.answer("Use ± to change the goal")
+
+
+@router.callback_query(F.data.startswith("kpi:m:"))
+async def kpi_pick_metric(callback: CallbackQuery, config: ConfigStore, stats: StatsService) -> None:
+    config.set_kpi_metric(callback.data.split(":", 2)[2])
+    await _rerender(callback, stats)
+    await callback.answer("Metric set ✓")
+
+
+@router.callback_query(F.data == "kpi:stage")
+async def kpi_open_stage(callback: CallbackQuery, config: ConfigStore) -> None:
+    await callback.message.edit_reply_markup(reply_markup=kpi_stage_kb(config.kpi_metric))
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("kpi:s:"))
+async def kpi_pick_stage(callback: CallbackQuery, config: ConfigStore, stats: StatsService) -> None:
+    v = callback.data.split(":", 2)[2]
+    config.set_kpi_metric("won" if v == "WON" else f"stage:{v}")
+    await _rerender(callback, stats)
+    await callback.answer("Stage set ✓")
+
+
+@router.callback_query(F.data == "kpi:back")
+async def kpi_back(callback: CallbackQuery, config: ConfigStore, stats: StatsService) -> None:
+    await _rerender(callback, stats)
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("kpi:g:"))
+async def kpi_goal(callback: CallbackQuery, config: ConfigStore, stats: StatsService) -> None:
+    delta = int(callback.data.split(":", 2)[2])
+    config.set_kpi_goal(max(1, config.kpi_goal + delta))
+    await _rerender(callback, stats)
+    await callback.answer(f"Goal {config.kpi_goal}")
