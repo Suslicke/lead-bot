@@ -52,7 +52,10 @@ app/
 
 - **capture.py** is the core flow: text → `extractor.extract` (in a thread) → `to_payload`
   → **dedup** by `prospectLink` (then exact name) → preview with `confirm_kb` or `dup_kb`
-  → callbacks `create:` / `update:` / `cancel:`. **Update refreshes facts only**
+  → callbacks `create:` / `update:` / `cancel:`. **Multi-lead:** the LLM returns `{leads:[…]}`
+  (capture tolerates a flat lead too); **1** → the rich single draft; **N** → a compact summary +
+  `batch_kb` "Create all" (intra-message dedupe via `_dedupe_within`, CRM dups skipped, `createall:`
+  callback) — one LLM call for the whole batch. **Update refreshes facts only**
   (`_REFRESHABLE`: niche, hasWebsite, city, contact, prospectLink, addressText, reviewsCount,
   rating, language) — it must NOT touch `stage`/`nextStep`/`notes` (the user's pipeline work).
   Before spending a call it checks the **per-user daily LLM cap** (`usage.over_limit`) and hard-stops;
