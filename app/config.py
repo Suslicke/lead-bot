@@ -84,6 +84,7 @@ _DEFAULTS = {
     "llm_max_tokens": 300_000,
     "deal_currency": "KZT",  # default currency for opportunities created by /convert
     "members": [],           # extra allowed Telegram ids (added at runtime via /members)
+    "kpi_metric": "created", # what the KPI counts: created | worked | won | stage:<STAGE>
 }
 
 
@@ -154,6 +155,21 @@ class ConfigStore:
         if code not in CURRENCIES:
             raise ValueError(f"unsupported currency {code!r}; pick one of {', '.join(CURRENCIES)}")
         self._data["deal_currency"] = code
+        self._save()
+
+    @property
+    def kpi_metric(self) -> str:
+        return str(self._data.get("kpi_metric", "created"))
+
+    def set_kpi_metric(self, metric: str) -> None:
+        """Set what the KPI counts: 'created' | 'worked' | 'won' | 'stage:<STAGE>'."""
+        from .twenty import STAGE_ORDER
+        metric = metric.strip()
+        ok = metric in ("created", "worked", "won") or (
+            metric.startswith("stage:") and metric.split(":", 1)[1] in STAGE_ORDER)
+        if not ok:
+            raise ValueError(f"unknown KPI metric {metric!r}")
+        self._data["kpi_metric"] = metric
         self._save()
 
     # --- runtime-added allowed users (the env ALLOWED_TELEGRAM_IDS are the admins) ---

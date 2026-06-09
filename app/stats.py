@@ -14,6 +14,22 @@ from .twenty import CLOSED, SOURCE, STAGE_LABEL, STAGE_ORDER, TwentyClient
 SOURCE_LABEL = {v: k for k, v in SOURCE.items()}
 
 
+def resolve_kpi(metric: str, *, created: int, worked: int, counts) -> tuple[int, str]:
+    """Map a KPI metric → (value, short label). Falls back to 'created' on anything unknown.
+
+    created/worked are day-scoped flow counts; won + stage:<X> are point-in-time pipeline
+    counts. Keeps the /today text and PNG cards reading from one definition.
+    """
+    if metric == "worked":
+        return worked, "worked today"
+    if metric == "won":
+        return counts.get("WON", 0), "won"
+    if metric.startswith("stage:"):
+        st = metric.split(":", 1)[1]
+        return counts.get(st, 0), STAGE_LABEL.get(st, st).lower()
+    return created, "new leads"
+
+
 class StatsService:
     def __init__(self, twenty: TwentyClient, config: ConfigStore, tz: ZoneInfo):
         self._twenty = twenty
@@ -42,13 +58,17 @@ class StatsService:
                if l.get("stage") not in CLOSED
                and (parse_dt(l.get("nextStepDate")) or MAX_UTC) <= end]
         created = sum(1 for l in leads if (parse_dt(l.get("createdAt")) or MIN_UTC) >= start)
+        worked = sum(1 for l in leads if (parse_dt(l.get("updatedAt")) or MIN_UTC) >= start)
         won, lost = counts.get("WON", 0), counts.get("LOST", 0)
+        metric = self._config.kpi_metric
+        kpi_value, kpi_label = resolve_kpi(metric, created=created, worked=worked, counts=counts)
         return {
             "date": datetime.now(self._tz).strftime("%d %b"),
             "counts": counts, "sources": sources, "due": due, "created": created,
-            "total": len(leads), "won": won, "lost": lost,
+            "worked": worked, "total": len(leads), "won": won, "lost": lost,
             "conv": (won / (won + lost)) if (won + lost) else None,
             "goal": self._config.kpi_goal,
+            "kpi_metric": metric, "kpi_value": kpi_value, "kpi_label": kpi_label,
         }
 
     async def status_text(self, header: str) -> str:
@@ -72,5 +92,6 @@ class StatsService:
             lines.append(f"  • {l.get('name')} — {l.get('nextStep') or '—'}")
         if len(due) > 8:
             lines.append(f"  …and {len(due) - 8} more")
-        lines += ["", f"🎯 <b>KPI {d['created']}/{d['goal']}</b>  {progress_bar(d['created'], d['goal'])}"]
+        lines += ["", f"🎯 <b>KPI · {d['kpi_label']} {d['kpi_value']}/{d['goal']}</b>  "
+                  f"{progress_bar(d['kpi_value'], d['goal'])}"]
         return "\n".join(x for x in lines if x is not None)
