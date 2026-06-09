@@ -39,7 +39,22 @@ PANEL = _oklch(0.205, 0, 0)     # card surface
 FG = _oklch(0.985, 0, 0)        # foreground text
 MUTED = _oklch(0.708, 0, 0)     # secondary text
 BRAND = _oklch(0.70, 0.18, 285)  # violet accent
-TRACK = _oklch(0.30, 0, 0)      # bar track
+TRACK = _oklch(0.28, 0, 0)      # bar / ring track
+GREEN = _oklch(0.72, 0.17, 150)  # won
+RED = _oklch(0.60, 0.13, 25)     # lost
+
+# Progress stages get a cool→bright violet ramp (further along = brighter); Won green, Lost red.
+_RAMP = {"TO_CONTACT": 0.0, "CONTACTED": 0.25, "REPLIED": 0.5,
+         "QUALIFIED": 0.75, "PROPOSAL": 1.0}
+
+
+def _stage_color(stage: str) -> tuple[int, int, int]:
+    if stage == "WON":
+        return GREEN
+    if stage == "LOST":
+        return RED
+    t = _RAMP.get(stage, 0.5)
+    return _oklch(0.60 + 0.16 * t, 0.10 + 0.09 * t, 285)
 
 _DEJAVU = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
 _DEJAVU_BOLD = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
@@ -58,52 +73,61 @@ def _font(size: int, bold: bool = False):
 def render_today(data: dict) -> bytes:
     """data = StatsService.today_data() → PNG bytes for a branded stats card."""
     active = [(s, data["counts"][s]) for s in STAGE_ORDER if data["counts"].get(s)]
-    # bars scale to the pipeline total → width = a stage's real share (not just relative
-    # to the biggest stage), so a goal change doesn't make a 6-lead stage look "full".
     total = max(data["total"], 1)
+    n = len(active)
 
-    W, M, PAD = 860, 24, 40
-    H = 250 + 46 * len(active)
+    W, M, PAD = 860, 24, 44
+    ROW, HEADER_H, KPI_H, FOOTER_H = 48, 72, 116, 60
+    H = 2 * (M + PAD) + HEADER_H + KPI_H + ROW * n + FOOTER_H
     img = Image.new("RGB", (W, H), BG)
     d = ImageDraw.Draw(img)
-    d.rounded_rectangle([M, M, W - M, H - M], radius=28, fill=PANEL)
+    d.rounded_rectangle([M, M, W - M, H - M], radius=30, fill=PANEL)
     x0, x1 = M + PAD, W - M - PAD
-    y = M + PAD
 
-    f_title, f_big, f_body, f_small = _font(40, True), _font(30, True), _font(23), _font(19)
-    # header
+    f_title, f_big, f_body = _font(40, True), _font(28, True), _font(23)
+    f_small, f_ring, f_cap = _font(19), _font(27, True), _font(16)
+
+    # --- header ---
+    y = M + PAD
     d.text((x0, y), "Today", font=f_title, fill=FG)
     dt = data["date"]
     d.text((x1 - d.textlength(dt, font=f_body), y + 12), dt, font=f_body, fill=MUTED)
     d.rounded_rectangle([x0, y + 52, x0 + 46, y + 57], radius=3, fill=BRAND)  # brand underline
-    y += 78
+    y += HEADER_H
 
-    # KPI row + progress bar (metric is configurable — /kpi metric)
+    # --- KPI: label on the left, progress ring on the right ---
     value, goal, label = data["kpi_value"], data["goal"], data["kpi_label"]
-    d.text((x0, y), f"KPI · {label}  {value}/{goal}", font=f_big, fill=FG)
-    bw, bx = 300, x1 - 300
-    d.rounded_rectangle([bx, y + 14, bx + bw, y + 30], radius=8, fill=TRACK)
-    if goal > 0 and value > 0:
-        fill_w = max(16, round(bw * min(1.0, value / goal)))
-        d.rounded_rectangle([bx, y + 14, bx + fill_w, y + 30], radius=8, fill=BRAND)
-    y += 60
+    d.text((x0, y + 26), "KPI", font=f_cap, fill=MUTED)
+    d.text((x0, y + 48), label, font=f_big, fill=FG)
+    r, rw = 46, 13
+    cx, cy = x1 - r, y + KPI_H // 2 - 6
+    box = [cx - r, cy - r, cx + r, cy + r]
+    d.arc(box, 0, 360, fill=TRACK, width=rw)
+    ratio = min(1.0, value / goal) if goal > 0 else 0.0
+    if value > 0:
+        d.arc(box, -90, -90 + 360 * ratio, fill=BRAND, width=rw)
+    vt = f"{value}/{goal}"
+    d.text((cx - d.textlength(vt, font=f_ring) / 2, cy - 16), vt, font=f_ring, fill=FG)
+    y += KPI_H
 
-    # pipeline funnel
-    for s, n in active:
-        d.text((x0, y), STAGE_LABEL[s], font=f_body, fill=MUTED)
-        track_x = x0 + 130
-        full = x1 - 40 - track_x
-        d.rounded_rectangle([track_x, y + 4, x1 - 40, y + 26], radius=8, fill=TRACK)
-        w = max(10, round(full * n / total))
-        d.rounded_rectangle([track_x, y + 4, track_x + w, y + 26], radius=8, fill=BRAND)
-        d.text((x1 - d.textlength(str(n), font=f_body), y), str(n), font=f_body, fill=FG)
-        y += 46
+    # --- pipeline: one coloured bar per stage (width = share of the total) ---
+    label_w, num_w = 134, 44
+    track_x, track_x1 = x0 + label_w, x1 - num_w
+    for s, cnt in active:
+        d.text((x0, y + 1), STAGE_LABEL[s], font=f_body, fill=MUTED)
+        d.rounded_rectangle([track_x, y + 5, track_x1, y + 29], radius=9, fill=TRACK)
+        w = max(14, round((track_x1 - track_x) * cnt / total))
+        d.rounded_rectangle([track_x, y + 5, track_x + w, y + 29], radius=9, fill=_stage_color(s))
+        d.text((x1 - d.textlength(str(cnt), font=f_body), y + 1), str(cnt), font=f_body, fill=FG)
+        y += ROW
 
-    # footer: conversion · today · sources, + wordmark
-    y += 6
+    # --- footer: stat row (· separators) + wordmark ---
+    y += 8
     conv = f"{round(data['conv'] * 100)}%" if data["conv"] is not None else "—"
-    d.text((x0, y), f"Conv {conv}    +{data['created']} today    {data['total']} total",
-           font=f_small, fill=MUTED)
+    stats = f"Conv {conv}   ·   +{data['created']} today   ·   {data['total']} total"
+    if data.get("due"):
+        stats += f"   ·   {len(data['due'])} due"
+    d.text((x0, y), stats, font=f_small, fill=MUTED)
     mark = "suslicketeam"
     d.text((x1 - d.textlength(mark, font=f_small), y), mark, font=f_small, fill=BRAND)
 

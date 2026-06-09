@@ -152,7 +152,9 @@ Makes the bot a **source** of leads, not just a logger. Two modes, both off when
 - **`card.py`** renders the same data as a **PNG** in the *site palette* (dark + violet brand —
   the real `globals.css` oklch tokens, converted oklch→sRGB in-module). Pillow only (no browser —
   light enough for the box, unlike Chromium). Font: `fonts-dejavu-core` (added to the Dockerfile;
-  falls back to Pillow's default). `/today` (and the menu hub) attach a **🖼 Card** inline button
+  falls back to Pillow's default). Layout: header + **KPI progress ring** (top-right, value/goal arc)
+  + **colour-coded stage bars** (`_stage_color`: cool→bright violet by pipeline progress, Won green,
+  Lost red; width = share of total) + a footer stat row (conv · today · total · due). `/today` (and the menu hub) attach a **🖼 Card** inline button
   (`handlers/cards.py`, `today_card` callback) → renders off-thread (`asyncio.to_thread`) →
   `answer_photo`.
 - **`metrics.py`** — a process-global daily per-API counter (`data/api.json`), separate from
