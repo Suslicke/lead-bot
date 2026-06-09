@@ -30,6 +30,7 @@ class Settings:
     sentry_dsn: str | None = None            # optional — unset disables Sentry
     twogis_api_key: str | None = None        # optional — unset disables 2GIS link enrichment
     twogis_api_url: str = "https://catalog.api.2gis.com"
+    overpass_url: str | None = None           # optional — unset disables OSM /harvest + enrichment
 
     @staticmethod
     def from_env() -> "Settings":
@@ -69,6 +70,7 @@ class Settings:
             sentry_dsn=os.environ.get("SENTRY_DSN") or None,
             twogis_api_key=os.environ.get("TWOGIS_API_KEY") or None,
             twogis_api_url=os.environ.get("TWOGIS_API_URL", "https://catalog.api.2gis.com").rstrip("/"),
+            overpass_url=(os.environ.get("OVERPASS_URL") or "").rstrip("/") or None,
         )
 
 

@@ -11,3 +11,20 @@ services:
     volumes:
       - ./data:/app/data   # persists config.json (KPI goal + digest times)
     restart: always
+
+  # Self-hosted Overpass for /harvest + OSM enrichment (set OVERPASS_URL in .env to enable).
+  # First boot runs a ONE-OFF, resource-heavy import of the Kazakhstan extract (tens of
+  # minutes CPU, a few GB disk) — then switch OVERPASS_MODE to "clone"/leave as-is. Bound to
+  # 127.0.0.1 only (the bot reaches it via the published port; never public).
+  overpass:
+    image: wiktorn/overpass-api:latest
+    environment:
+      OVERPASS_MODE: init
+      OVERPASS_PLANET_URL: https://download.geofabrik.de/asia/kazakhstan-latest.osm.bz2
+      OVERPASS_META: "yes"
+      OVERPASS_RULES_LOAD: "10"
+    ports:
+      - "127.0.0.1:12347:80"   # → OVERPASS_URL=http://127.0.0.1:12347/api/interpreter
+    volumes:
+      - ./overpass-db:/db
+    restart: always

@@ -97,6 +97,39 @@ branch is skipped** (`dp["twogis"]=None`), behaviour identical to text+LLM.
   `contact` stays empty and `hasWebsite` defaults to "No" — fill those manually or upgrade the plan.
   Enrichment degrades gracefully when a field is missing.
 
+### OSM harvest + enrichment (`app/osm.py` + `app/osm_tags.py` + `app/handlers/harvest.py`, gated on `OVERPASS_URL`)
+
+Makes the bot a **source** of leads, not just a logger. Two modes, both off when
+`OVERPASS_URL` is unset (`dp["overpass"]=None`; `/harvest` not advertised by `set_my_commands`):
+
+- **Harvest (`/harvest`):** pick a niche (inline kb, from live niches ∩ `NICHE_TAG_MAP`) →
+  send a city/district (FSM `Harvest.city`) → `OverpassClient.harvest()` runs an Overpass-QL
+  `area["name"=…]` query and returns ≤ `HARVEST_LIMIT` (50) places → each `OsmPlace.to_fields()`
+  (LLM/2GIS-shaped, labels) → `to_payload` → the **same `capture._present_drafts` batch flow**
+  ("Create all", per-lead ✏️, dups skipped). So the harvest handler is thin — all the
+  draft/dedup/confirm machinery is reused.
+- **Enrichment:** on the **text→LLM** path, `capture._osm_enrich` backfills only-empty
+  `addressText`/`contact` (+ stamps `osmId`, upgrades `hasWebsite`) from a **unique**
+  `find_by_name(name, city)` match (>1 → don't guess). Best-effort: any Overpass error is
+  swallowed, capture never blocks.
+
+- **`NICHE_TAG_MAP`** (niche LABEL → OSM `(key,value)` tags) is a **product decision**, editable:
+  `Cafe`=`amenity=cafe` only; `Beauty`=`shop=beauty`/`hairdresser`+`leisure=spa`+`shop=massage`;
+  `Gaming club`=draft (`adult_gaming_centre`/`internet_cafe` — OSM coverage is weak, expect few).
+  The label MUST match the niche vocabulary (else `to_payload`→OTHER).
+- **OSM has no reviews/rating** — those stay empty (filled later from 2GIS). The stable
+  `osm_type/id` (e.g. `node/123`) is written to **`Lead.osmId`**, the dedup key that survives the
+  `prospectLink` being swapped to a 2GIS URL. **Dedup** (`capture.find_duplicate`) now matches
+  `osmId` → `prospectLink` → name (city-scoped), so a re-harvest and a 2GIS twin both collapse.
+- **Infra:** a **self-hosted Overpass** (`wiktorn/overpass-api`, Kazakhstan extract) in
+  `docker-compose.yml`, bound to `127.0.0.1`; `OVERPASS_URL` points the bot at its
+  `/api/interpreter`. Chosen over public Overpass (rate limits). Not Nominatim — enrichment matches
+  by name+area via Overpass, so one instance serves both modes.
+- **Prod prerequisites (Metadata API, one-off on the live CRM — see website repo's CRM section):**
+  add a **`osmId` TEXT field** to the Lead object and an **`OSM` option** to the `source` Select
+  (and mirror it onto Company), *before* deploying — Twenty rejects unknown fields on `/rest/leads`.
+- Design: website repo `docs/plans/2026-06-09-lead-bot-osm-design.md`.
+
 ## LLM providers (Strategy pattern — `app/llm.py`)
 
 Provider is pluggable via a registry. **Add a provider = one decorated function**, no central
