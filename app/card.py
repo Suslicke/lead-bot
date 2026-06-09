@@ -58,7 +58,9 @@ def _font(size: int, bold: bool = False):
 def render_today(data: dict) -> bytes:
     """data = StatsService.today_data() → PNG bytes for a branded stats card."""
     active = [(s, data["counts"][s]) for s in STAGE_ORDER if data["counts"].get(s)]
-    peak = max((n for _, n in active), default=1)
+    # bars scale to the pipeline total → width = a stage's real share (not just relative
+    # to the biggest stage), so a goal change doesn't make a 6-lead stage look "full".
+    total = max(data["total"], 1)
 
     W, M, PAD = 860, 24, 40
     H = 250 + 46 * len(active)
@@ -76,13 +78,13 @@ def render_today(data: dict) -> bytes:
     d.rounded_rectangle([x0, y + 52, x0 + 46, y + 57], radius=3, fill=BRAND)  # brand underline
     y += 78
 
-    # KPI row + progress bar
-    created, goal = data["created"], data["goal"]
-    d.text((x0, y), f"KPI  {created}/{goal}", font=f_big, fill=FG)
+    # KPI row + progress bar (metric is configurable — /kpi metric)
+    value, goal, label = data["kpi_value"], data["goal"], data["kpi_label"]
+    d.text((x0, y), f"KPI · {label}  {value}/{goal}", font=f_big, fill=FG)
     bw, bx = 300, x1 - 300
     d.rounded_rectangle([bx, y + 14, bx + bw, y + 30], radius=8, fill=TRACK)
-    if goal > 0 and created > 0:
-        fill_w = max(16, round(bw * min(1.0, created / goal)))
+    if goal > 0 and value > 0:
+        fill_w = max(16, round(bw * min(1.0, value / goal)))
         d.rounded_rectangle([bx, y + 14, bx + fill_w, y + 30], radius=8, fill=BRAND)
     y += 60
 
@@ -92,7 +94,7 @@ def render_today(data: dict) -> bytes:
         track_x = x0 + 130
         full = x1 - 40 - track_x
         d.rounded_rectangle([track_x, y + 4, x1 - 40, y + 26], radius=8, fill=TRACK)
-        w = max(10, round(full * n / peak))
+        w = max(10, round(full * n / total))
         d.rounded_rectangle([track_x, y + 4, track_x + w, y + 26], radius=8, fill=BRAND)
         d.text((x1 - d.textlength(str(n), font=f_body), y), str(n), font=f_body, fill=FG)
         y += 46
@@ -100,7 +102,7 @@ def render_today(data: dict) -> bytes:
     # footer: conversion · today · sources, + wordmark
     y += 6
     conv = f"{round(data['conv'] * 100)}%" if data["conv"] is not None else "—"
-    d.text((x0, y), f"Conv {conv}    +{created} today    {data['total']} total",
+    d.text((x0, y), f"Conv {conv}    +{data['created']} today    {data['total']} total",
            font=f_small, fill=MUTED)
     mark = "suslicketeam"
     d.text((x1 - d.textlength(mark, font=f_small), y), mark, font=f_small, fill=BRAND)

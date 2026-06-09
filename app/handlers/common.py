@@ -19,13 +19,15 @@ HELP = (
     "/today — due follow-ups + KPI\n"
     "/pipeline — counts per stage\n"
     "/leads &lt;stage&gt; — list (e.g. /leads replied)\n"
-    "/kpi — progress · /kpi set 10 — daily goal\n"
+    "/kpi — progress · /kpi set 10 — goal · /kpi metric won — what it counts\n"
     "/digest — send now · /digest list · /digest add 09:00 · /digest remove 19:00 · /digest off\n"
     "/niche — list niches · /niche add &lt;name&gt; — new niche (LLM picks it up)\n"
     "/source — list sources · /source add &lt;name&gt;\n"
     "/usage — LLM tokens/requests today · /llm set req|tok &lt;n&gt; — daily caps\n"
     "/convert — turn a replied/qualified lead into Company + Opportunity\n"
+    "/harvest — find leads from OpenStreetMap (pick a niche → a city)\n"
     "/currency — default deal currency (e.g. /currency USD)\n"
+    "/members — who can use the bot · /members add &lt;id&gt; (admins only)\n"
     "/settings — show config"
 )
 

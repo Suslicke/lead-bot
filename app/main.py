@@ -21,6 +21,7 @@ _COMMANDS = [
     ("source", "Sources (add new)"),
     ("currency", "Default deal currency"),
     ("usage", "LLM usage today"),
+    ("members", "Manage allowed users"),
     ("settings", "Show config"),
     ("help", "Help"),
 ]
@@ -80,7 +81,7 @@ async def main() -> None:
     dp["twogis"] = twogis
     dp["overpass"] = overpass
 
-    whitelist = Whitelist(settings.allowed_ids)
+    whitelist = Whitelist(settings.allowed_ids, config)  # admins (env) + runtime members
     for router in get_routers():
         router.message.filter(whitelist)
         router.callback_query.filter(whitelist)

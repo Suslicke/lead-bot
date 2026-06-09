@@ -60,7 +60,8 @@ app/
   rating, language) — it must NOT touch `stage`/`nextStep`/`notes` (the user's pipeline work).
   Before spending a call it checks the **per-user daily LLM cap** (`usage.over_limit`) and hard-stops;
   after a successful extract it records the call's token usage.
-- Commands: `/start` `/menu` `/today` `/pipeline` `/leads <stage>` `/kpi [set N]` `/digest [list|add HH:MM|remove HH:MM|off]` `/niche [add <name>]` `/source [add <name>]` `/convert` `/currency [CODE]` `/usage` `/llm set req|tok <n>` `/settings` `/help`.
+- Commands: `/start` `/menu` `/today` `/pipeline` `/leads <stage>` `/kpi [set N]` `/digest [list|add HH:MM|remove HH:MM|off]` `/niche [add <name>]` `/source [add <name>]` `/convert` `/harvest` `/currency [CODE]` `/usage` `/llm set req|tok <n>` `/members [add|remove <id>]` `/settings` `/help`.
+- **Runtime allowlist (`/members`, `app/handlers/members.py`):** env `ALLOWED_TELEGRAM_IDS` are **admins**; admins add/remove extra **members** (persisted in `config.json`). `filters.Whitelist` reads `admins ∪ config.members` **live** per event (not frozen at startup), so a new member works without a restart. Members may use the bot but not manage the allowlist. `/harvest` is also reachable from the bottom-panel **🌍 Harvest** button (a `harvest.router` `F.text==` handler, not in `menu.NAV`).
 
 ### Dynamic niche/source options (`app/reference.py` + Metadata API)
 
@@ -138,8 +139,14 @@ Makes the bot a **source** of leads, not just a logger. Two modes, both off when
 ### /today stats card + API metrics (`app/stats.py`, `app/card.py`, `app/metrics.py`)
 
 - **`StatsService.today_data()`** is the single source of the numbers (counts/sources/due/created/
-  conv/goal); **both** renderers consume it. `status_text()` renders a text card — a monospace
-  `<pre>` **funnel** (`timeutil.bar`, proportional) + conversion + source split + KPI bar.
+  worked/conv/goal + the resolved `kpi_value`/`kpi_label`); **both** renderers consume it.
+  `status_text()` renders a text card — a monospace `<pre>` **funnel** (`timeutil.bar`,
+  proportional) + conversion + source split + KPI bar.
+- **Configurable KPI** (`stats.resolve_kpi`, `config.kpi_metric`, `/kpi metric <x>`): the KPI line
+  counts one of `created` (new leads today, default) · `worked` (leads touched today, by
+  `updatedAt`) · `won` · `stage:<STAGE>` (current count in a stage). `/kpi set <n>` sets the goal;
+  the KPI bar scales value/goal. The PNG **funnel bars scale to the pipeline total** (a stage's real
+  share), NOT to the biggest stage — so a goal change doesn't make a small stage look "full".
 - **`card.py`** renders the same data as a **PNG** in the *site palette* (dark + violet brand —
   the real `globals.css` oklch tokens, converted oklch→sRGB in-module). Pillow only (no browser —
   light enough for the box, unlike Chromium). Font: `fonts-dejavu-core` (added to the Dockerfile;

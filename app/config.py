@@ -83,6 +83,8 @@ _DEFAULTS = {
     "llm_max_requests": 200,
     "llm_max_tokens": 300_000,
     "deal_currency": "KZT",  # default currency for opportunities created by /convert
+    "members": [],           # extra allowed Telegram ids (added at runtime via /members)
+    "kpi_metric": "created", # what the KPI counts: created | worked | won | stage:<STAGE>
 }
 
 
@@ -154,3 +156,41 @@ class ConfigStore:
             raise ValueError(f"unsupported currency {code!r}; pick one of {', '.join(CURRENCIES)}")
         self._data["deal_currency"] = code
         self._save()
+
+    @property
+    def kpi_metric(self) -> str:
+        return str(self._data.get("kpi_metric", "created"))
+
+    def set_kpi_metric(self, metric: str) -> None:
+        """Set what the KPI counts: 'created' | 'worked' | 'won' | 'stage:<STAGE>'."""
+        from .twenty import STAGE_ORDER
+        metric = metric.strip()
+        ok = metric in ("created", "worked", "won") or (
+            metric.startswith("stage:") and metric.split(":", 1)[1] in STAGE_ORDER)
+        if not ok:
+            raise ValueError(f"unknown KPI metric {metric!r}")
+        self._data["kpi_metric"] = metric
+        self._save()
+
+    # --- runtime-added allowed users (the env ALLOWED_TELEGRAM_IDS are the admins) ---
+    @property
+    def members(self) -> list[int]:
+        return [int(x) for x in self._data.get("members", [])]
+
+    def add_member(self, uid: int) -> bool:
+        """Add a Telegram id to the allowlist. Returns False if already present."""
+        ids = self.members
+        if int(uid) in ids:
+            return False
+        self._data["members"] = sorted(set(ids) | {int(uid)})
+        self._save()
+        return True
+
+    def remove_member(self, uid: int) -> bool:
+        """Remove a runtime-added id. Returns False if it wasn't there."""
+        ids = self.members
+        if int(uid) not in ids:
+            return False
+        self._data["members"] = [x for x in ids if x != int(uid)]
+        self._save()
+        return True
