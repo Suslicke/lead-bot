@@ -91,8 +91,11 @@ branch is skipped** (`dp["twogis"]=None`), behaviour identical to text+LLM.
   firm page is an anti-bot SPA shell (no data, no key); a headless Playwright render from the VPS
   IP gets a **2GIS CAPTCHA** (datacenter IP blocked); and the box has ~870 MB free RAM, no swap, so
   Chromium-per-capture would OOM-risk the CRM. The Catalog API (a **free demo key** works) is the
-  only robust path. `reviews`/`rating` may be an on-demand (paid) field on some 2GIS plans —
-  enrichment degrades gracefully without it.
+  only robust path. **Field caveats (verified on a demo key):** `reviews` works but the keys are
+  `general_rating`/`general_review_count` (branch) with `org_*` fallback — NOT `rating`/`review_count`;
+  `contact_groups` (phone/website) is **restricted** on the demo plan (absent from the response), so
+  `contact` stays empty and `hasWebsite` defaults to "No" — fill those manually or upgrade the plan.
+  Enrichment degrades gracefully when a field is missing.
 
 ## LLM providers (Strategy pattern — `app/llm.py`)
 
