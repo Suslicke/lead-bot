@@ -170,6 +170,12 @@ def _aigateway(s) -> Extractor:
     return OpenAICompatExtractor(base, s.model, s.llm_api_key, s.cf_aig_token)
 
 
+@provider("ollama")  # self-hosted Ollama (OpenAI-compat), optional nginx bearer auth
+def _ollama(s) -> Extractor:
+    _require(s, "ollama_base_url")
+    return OpenAICompatExtractor(s.ollama_base_url, s.model, s.llm_api_key)
+
+
 def build_extractor(settings) -> Extractor:
     try:
         return PROVIDERS[settings.llm_provider](settings)

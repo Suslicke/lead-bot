@@ -24,7 +24,8 @@ class Settings:
     cf_api_token: str | None = None          # cloudflare (Workers AI direct)
     aig_gateway_id: str | None = None        # aigateway: the AI Gateway id
     cf_aig_token: str | None = None          # aigateway: optional gateway auth token
-    llm_api_key: str | None = None           # aigateway: the provider key (Google/Anthropic/OpenAI)
+    llm_api_key: str | None = None           # aigateway provider key / ollama bearer token (nginx)
+    ollama_base_url: str | None = None       # ollama: self-hosted OpenAI-compat base, e.g. https://llm.suslicketeam.com/v1
     sentry_dsn: str | None = None            # optional — unset disables Sentry
 
     @staticmethod
@@ -37,6 +38,7 @@ class Settings:
             "cloudflare": "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
             "aigateway": "google-ai-studio/gemini-2.0-flash",
             "anthropic": "claude-haiku-4-5",
+            "ollama": "qwen2.5:7b",
         }
         default_model = defaults.get(provider, "claude-haiku-4-5")
         model = os.environ.get("MODEL") or default_model
@@ -58,6 +60,7 @@ class Settings:
             aig_gateway_id=os.environ.get("AIG_GATEWAY_ID") or None,
             cf_aig_token=os.environ.get("CF_AIG_TOKEN") or None,
             llm_api_key=os.environ.get("LLM_API_KEY") or None,
+            ollama_base_url=os.environ.get("OLLAMA_BASE_URL") or None,
             sentry_dsn=os.environ.get("SENTRY_DSN") or None,
         )
 
