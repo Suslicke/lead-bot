@@ -121,6 +121,20 @@ def lang_kb(ref: str, payload: dict) -> InlineKeyboardMarkup:
     ])
 
 
+def harvest_niche_kb(labels: list[str]) -> InlineKeyboardMarkup:
+    """Pick a niche to harvest from OSM (callback hvn:<label>) + Cancel."""
+    rows, pair = [], []
+    for label in labels:
+        pair.append(InlineKeyboardButton(text=label, callback_data=f"hvn:{label}"))
+        if len(pair) == 2:
+            rows.append(pair)
+            pair = []
+    if pair:
+        rows.append(pair)
+    rows.append([InlineKeyboardButton(text="✖️ Cancel", callback_data="hvcancel")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
 def convert_kb(leads: list[dict]) -> InlineKeyboardMarkup:
     """One button per convertible lead → Company + Opportunity (callback conv:<leadId>)."""
     rows = [[InlineKeyboardButton(text=f"➡️ {l.get('name') or 'Unnamed'}",

@@ -16,7 +16,7 @@ NICHE = {"Cafe": "CAFE", "Beauty": "BEAUTY", "Gaming club": "GAMING_CLUB",
          "Dental": "DENTAL", "Detailing": "DETAILING", "Other": "OTHER"}
 HAS_WEBSITE = {"No": "NO", "Weak": "WEAK", "Yes": "YES"}
 SOURCE = {"2GIS": "TWO_GIS", "Site": "SITE", "Instagram": "INSTAGRAM",
-          "Referral": "REFERRAL", "Event": "EVENT", "Shirt": "SHIRT"}
+          "Referral": "REFERRAL", "Event": "EVENT", "Shirt": "SHIRT", "OSM": "OSM"}
 # language is a MULTI_SELECT on the Lead object — a lead can speak several (RU + KK).
 LANGUAGES = ("RU", "KK", "EN")
 # Opportunity.amount is multi-currency (currencyCode stored per record; amount * 1_000_000).
@@ -102,7 +102,7 @@ def to_payload(fields: dict, niche_map: dict | None = None, source_map: dict | N
         "source": source_map.get(fields.get("source"), "TWO_GIS"),
         "language": _languages(fields.get("language")),
     }
-    for key in ("contact", "prospectLink", "addressText", "notes", "nextStep"):
+    for key in ("contact", "prospectLink", "addressText", "notes", "nextStep", "osmId"):
         if fields.get(key):
             payload[key] = fields[key]
     for key in ("reviewsCount", "rating"):  # numbers: include 0 too, skip only when absent

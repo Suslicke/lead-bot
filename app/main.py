@@ -25,10 +25,12 @@ _COMMANDS = [
     ("help", "Help"),
 ]
 
+from . import metrics
 from .config import ConfigStore, Settings
 from .filters import Whitelist
 from .handlers import get_routers
 from .llm import build_extractor
+from .osm import OverpassClient
 from .reference import OptionsRegistry
 from .scheduler import DigestScheduler
 from .stats import StatsService
@@ -54,12 +56,14 @@ async def main() -> None:
     # --- build dependencies ---
     config = ConfigStore(settings.config_path)
     usage = UsageStore(settings.usage_path, settings.tz)
+    metrics.init(settings.usage_path.parent / "api.json", settings.tz)  # per-API daily counters
     twenty = TwentyClient(settings.twenty_api_url, settings.twenty_api_key)
     extractor = build_extractor(settings)
     stats = StatsService(twenty, config, settings.tz)
     options = OptionsRegistry(twenty)
     await options.refresh()  # seed niche/source from Twenty (best-effort; falls back to hardcoded)
     twogis = TwoGisClient(settings.twogis_api_key, settings.twogis_api_url) if settings.twogis_api_key else None
+    overpass = OverpassClient(settings.overpass_url) if settings.overpass_url else None
     bot = Bot(token=settings.bot_token, default=DefaultBotProperties(parse_mode="HTML"))
     scheduler = DigestScheduler(settings.tz, config, stats, bot, settings.allowed_ids)
 
@@ -74,6 +78,7 @@ async def main() -> None:
     dp["scheduler"] = scheduler
     dp["options"] = options
     dp["twogis"] = twogis
+    dp["overpass"] = overpass
 
     whitelist = Whitelist(settings.allowed_ids)
     for router in get_routers():
@@ -82,10 +87,14 @@ async def main() -> None:
         dp.include_router(router)
 
     scheduler.start()
-    await bot.set_my_commands([BotCommand(command=c, description=d) for c, d in _COMMANDS])
-    log.info("lead-bot up (whitelist=%s, model=%s, twenty=%s, 2gis=%s)",
+    commands = list(_COMMANDS)
+    if overpass:  # only advertise /harvest when OSM is wired up
+        i = next((n for n, (c, _) in enumerate(commands) if c == "convert"), len(commands) - 1)
+        commands.insert(i + 1, ("harvest", "Find leads via OpenStreetMap"))
+    await bot.set_my_commands([BotCommand(command=c, description=d) for c, d in commands])
+    log.info("lead-bot up (whitelist=%s, model=%s, twenty=%s, 2gis=%s, osm=%s)",
              sorted(settings.allowed_ids) or "OPEN(!)", settings.model, settings.twenty_api_url,
-             "on" if twogis else "off")
+             "on" if twogis else "off", "on" if overpass else "off")
     await dp.start_polling(bot)
 
 

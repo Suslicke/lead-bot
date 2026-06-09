@@ -3,6 +3,7 @@ from aiogram import Router
 from aiogram.filters import Command, CommandObject
 from aiogram.types import Message
 
+from .. import metrics
 from ..config import ConfigStore
 from ..usage import UsageStore
 
@@ -17,11 +18,15 @@ def _cap(n: int) -> str:
 async def usage_cmd(message: Message, usage: UsageStore, config: ConfigStore) -> None:
     t = usage.today(message.from_user.id)
     rq, tk = config.llm_max_requests, config.llm_max_tokens
+    api = metrics.today()  # process-wide per-API call counts (single-user bot)
     await message.answer(
         "📊 <b>LLM usage today (you)</b>\n"
         f"Requests: <b>{t['requests']}</b> / {_cap(rq)}\n"
         f"Tokens: <b>{t['total_tokens']}</b> / {_cap(tk)}\n"
         f"  <i>prompt {t['prompt_tokens']} + completion {t['completion_tokens']}</i>\n\n"
+        "🌐 <b>API calls today</b>\n"
+        f"🤖 LLM: <b>{t['requests']}</b>  ·  🗺 2GIS: <b>{api.get('2gis', 0)}</b>  ·  "
+        f"🧭 OSM: <b>{api.get('osm', 0)}</b>\n\n"
         "Caps are per user, per day (reset at local midnight). 0 = unlimited.\n"
         "Change: <code>/llm set req 200</code> · <code>/llm set tok 300000</code>"
     )

@@ -14,6 +14,8 @@ import re
 
 import httpx
 
+from . import metrics
+
 log = logging.getLogger(__name__)
 
 # .../firm/<id>[/...] inside a 2gis link → the numeric branch id
@@ -93,6 +95,7 @@ class TwoGisClient:
     async def fetch(self, firm_id: str, link: str) -> dict | None:
         """Enrich one firm → an LLM-shaped fields dict, or None if 2GIS has no such item."""
         params = {"id": firm_id, "fields": self._FIELDS, "key": self._key}
+        metrics.hit("2gis")  # count the call (watch the demo-key quota via /usage)
         async with httpx.AsyncClient(timeout=15) as c:
             r = await c.get(f"{self._base}/3.0/items/byid", params=params)
         if r.status_code != 200:

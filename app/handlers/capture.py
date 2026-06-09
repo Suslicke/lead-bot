@@ -18,6 +18,8 @@ from .. import draft
 from ..config import ConfigStore, Settings
 from ..keyboards import batch_kb, edit_kb
 from ..llm import Extractor, schema_with_options
+from ..osm import OverpassClient
+from ..osm import enrich as osm_enrich
 from ..reference import OptionsRegistry
 from ..twenty import TwentyClient, to_payload
 from ..twogis import TwoGisClient, find_firms
@@ -28,40 +30,71 @@ router = Router()
 
 # Drafts awaiting confirmation now live in draft.PENDING / draft.BATCH (shared with edit.py).
 
-# fields a re-scan may refresh on an existing lead (facts, not pipeline state)
+# fields a re-scan may refresh on an existing lead (facts, not pipeline state).
+# osmId only ever appears in an OSM-sourced payload, so a 2GIS re-scan won't touch it.
 _REFRESHABLE = ("niche", "hasWebsite", "city", "contact", "prospectLink",
-                "addressText", "reviewsCount", "rating", "language")
+                "addressText", "reviewsCount", "rating", "language", "osmId")
 
 
 def _norm(url: str | None) -> str:
     return (url or "").strip().rstrip("/").lower()
 
 
+def _norm_name(name: str | None) -> str:
+    return (name or "").strip().lower()
+
+
 def find_duplicate(leads: list[dict], payload: dict) -> dict | None:
-    """Match by prospectLink (the natural key), then by exact name as a fallback."""
+    """Match by osmId, then prospectLink (both natural keys), then name (city-scoped).
+
+    osmId is the stable OSM key — it survives prospectLink being swapped to a 2GIS URL,
+    so a re-harvest finds the same lead. The name fallback is scoped to the same city
+    when the payload has one (so it also collapses a 2GIS-entered twin of an OSM lead).
+    """
+    osm_id = (payload.get("osmId") or "").strip().lower()
+    if osm_id:
+        for l in leads:
+            if (l.get("osmId") or "").strip().lower() == osm_id:
+                return l
     link = _norm(payload.get("prospectLink"))
     if link:
         for l in leads:
             if _norm(l.get("prospectLink")) == link:
                 return l
-    name = (payload.get("name") or "").strip().lower()
+    name = _norm_name(payload.get("name"))
+    city = _norm_name(payload.get("city"))
     if name:
         for l in leads:
-            if (l.get("name") or "").strip().lower() == name:
+            if _norm_name(l.get("name")) == name and (not city or _norm_name(l.get("city")) == city):
                 return l
     return None
 
 
 def _dedupe_within(payloads: list[dict]) -> list[dict]:
-    """Drop repeats inside one message (same link, or same name) — keep first seen."""
+    """Drop repeats inside one message (same osmId / link / name) — keep first seen."""
     seen, out = set(), []
     for p in payloads:
-        key = _norm(p.get("prospectLink")) or (p.get("name") or "").strip().lower()
+        key = (p.get("osmId") or "").strip().lower() or _norm(p.get("prospectLink")) or _norm_name(p.get("name"))
         if key and key in seen:
             continue
         seen.add(key)
         out.append(p)
     return out
+
+
+async def _osm_enrich(items: list, overpass: OverpassClient) -> None:
+    """Best-effort: fill empty address/contact (+ osmId) on sparse LLM drafts from a
+    *unique* OSM match. Skips items that already have the facts; never overrides them."""
+    for it in items:
+        if not isinstance(it, dict) or (it.get("addressText") and it.get("contact")):
+            continue
+        try:
+            matches = await overpass.find_by_name(it.get("name") or "", it.get("city") or "Almaty")
+        except Exception:  # noqa: BLE001 — enrichment is optional, never block capture
+            log.exception("osm enrich failed")
+            continue
+        if len(matches) == 1:  # >1 → don't guess
+            osm_enrich(it, matches[0])
 
 
 async def _present_drafts(note: Message, payloads: list[dict], twenty: TwentyClient) -> None:
@@ -99,7 +132,7 @@ async def _present_drafts(note: Message, payloads: list[dict], twenty: TwentyCli
 @router.message(StateFilter(None), F.text & ~F.text.startswith("/"))
 async def capture(message: Message, extractor: Extractor, twenty: TwentyClient,
                   options: OptionsRegistry, config: ConfigStore, usage: UsageStore,
-                  twogis: TwoGisClient | None) -> None:
+                  twogis: TwoGisClient | None, overpass: OverpassClient | None = None) -> None:
     nm, sm = options.value_map("niche"), options.value_map("source")
 
     # 2GIS link path (gated on TWOGIS_API_KEY): enrich each firm via the Catalog API, no LLM.
@@ -139,6 +172,8 @@ async def capture(message: Message, extractor: Extractor, twenty: TwentyClient,
         raw = result.fields
         # the model returns {"leads": [...]}; tolerate a flat single lead too (defensive)
         items = raw["leads"] if isinstance(raw.get("leads"), list) and raw["leads"] else [raw]
+        if overpass:  # backfill empty contact facts from OSM (best-effort, optional)
+            await _osm_enrich(items, overpass)
         payloads = _dedupe_within([to_payload(it, nm, sm) for it in items if isinstance(it, dict)])
     except Exception as e:  # noqa: BLE001
         log.exception("extract failed")

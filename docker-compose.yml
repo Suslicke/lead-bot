@@ -11,3 +11,10 @@ services:
     volumes:
       - ./data:/app/data   # persists config.json (KPI goal + digest times)
     restart: always
+
+# Overpass for /harvest + OSM enrichment does NOT run here — the CRM box is RAM-tight
+# (no swap). It runs on the netcup-observ box (/opt/overpass, Kazakhstan extract) and the
+# bot reaches it at 127.0.0.1:12347 via a forward-only SSH tunnel (systemd unit
+# `overpass-tunnel.service` on this host → observ). To enable, set in .env:
+#   OVERPASS_URL=http://127.0.0.1:12347/api/interpreter
+# unset → /harvest + OSM enrichment stay off.

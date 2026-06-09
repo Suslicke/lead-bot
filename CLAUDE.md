@@ -97,6 +97,60 @@ branch is skipped** (`dp["twogis"]=None`), behaviour identical to text+LLM.
   `contact` stays empty and `hasWebsite` defaults to "No" — fill those manually or upgrade the plan.
   Enrichment degrades gracefully when a field is missing.
 
+### OSM harvest + enrichment (`app/osm.py` + `app/osm_tags.py` + `app/handlers/harvest.py`, gated on `OVERPASS_URL`)
+
+Makes the bot a **source** of leads, not just a logger. Two modes, both off when
+`OVERPASS_URL` is unset (`dp["overpass"]=None`; `/harvest` not advertised by `set_my_commands`):
+
+- **Harvest (`/harvest`):** pick a niche (inline kb, from live niches ∩ `NICHE_TAG_MAP`) →
+  send a city/district (FSM `Harvest.city`) → `OverpassClient.harvest()` runs an Overpass-QL
+  `area["name"=…]` query and returns ≤ `HARVEST_LIMIT` (50) places → each `OsmPlace.to_fields()`
+  (LLM/2GIS-shaped, labels) → `to_payload` → the **same `capture._present_drafts` batch flow**
+  ("Create all", per-lead ✏️, dups skipped). So the harvest handler is thin — all the
+  draft/dedup/confirm machinery is reused.
+- **Enrichment:** on the **text→LLM** path, `capture._osm_enrich` backfills only-empty
+  `addressText`/`contact` (+ stamps `osmId`, upgrades `hasWebsite`) from a **unique**
+  `find_by_name(name, city)` match (>1 → don't guess). Best-effort: any Overpass error is
+  swallowed, capture never blocks.
+
+- **`NICHE_TAG_MAP`** (niche LABEL → OSM `(key,value)` tags) is a **product decision**, editable:
+  `Cafe`=`amenity=cafe` only; `Beauty`=`shop=beauty`/`hairdresser`+`leisure=spa`+`shop=massage`;
+  `Gaming club`=draft (`adult_gaming_centre`/`internet_cafe` — OSM coverage is weak, expect few).
+  The label MUST match the niche vocabulary (else `to_payload`→OTHER).
+- **OSM has no reviews/rating** — those stay empty (filled later from 2GIS). The stable
+  `osm_type/id` (e.g. `node/123`) is written to **`Lead.osmId`**, the dedup key that survives the
+  `prospectLink` being swapped to a 2GIS URL. **Dedup** (`capture.find_duplicate`) now matches
+  `osmId` → `prospectLink` → name (city-scoped), so a re-harvest and a 2GIS twin both collapse.
+- **Infra:** a **self-hosted Overpass** (`wiktorn/overpass-api`, Kazakhstan extract) runs on the
+  **netcup-observ** box at `/opt/overpass` (NOT the CRM box — it's RAM-tight, no swap). The bot
+  reaches it at `127.0.0.1:12347` via a **forward-only SSH tunnel** (systemd `overpass-tunnel.service`
+  on the CRM host → observ `127.0.0.1:12347`, key restricted `permitopen=127.0.0.1:12347`). So
+  `OVERPASS_URL=http://127.0.0.1:12347/api/interpreter` even though Overpass is on another host.
+  Chosen over public Overpass (rate limits) and a public TLS endpoint (no nginx/cert on observ; the
+  tunnel needs no firewall changes). Not Nominatim — enrichment matches by name+area via Overpass,
+  so one instance serves both modes. (Geofabrik dropped `.osm.bz2` for KZ → the `.pbf` was converted
+  to `.osm.bz2` with `osmium` and imported via `file://`; `OVERPASS_COMPRESSION=gz`, not `gzip`.)
+- **Prod prerequisites (Metadata API, one-off on the live CRM — see website repo's CRM section):**
+  add a **`osmId` TEXT field** to the Lead object and an **`OSM` option** to the `source` Select
+  (and mirror it onto Company), *before* deploying — Twenty rejects unknown fields on `/rest/leads`.
+- Design: website repo `docs/plans/2026-06-09-lead-bot-osm-design.md`.
+
+### /today stats card + API metrics (`app/stats.py`, `app/card.py`, `app/metrics.py`)
+
+- **`StatsService.today_data()`** is the single source of the numbers (counts/sources/due/created/
+  conv/goal); **both** renderers consume it. `status_text()` renders a text card — a monospace
+  `<pre>` **funnel** (`timeutil.bar`, proportional) + conversion + source split + KPI bar.
+- **`card.py`** renders the same data as a **PNG** in the *site palette* (dark + violet brand —
+  the real `globals.css` oklch tokens, converted oklch→sRGB in-module). Pillow only (no browser —
+  light enough for the box, unlike Chromium). Font: `fonts-dejavu-core` (added to the Dockerfile;
+  falls back to Pillow's default). `/today` (and the menu hub) attach a **🖼 Card** inline button
+  (`handlers/cards.py`, `today_card` callback) → renders off-thread (`asyncio.to_thread`) →
+  `answer_photo`.
+- **`metrics.py`** — a process-global daily per-API counter (`data/api.json`), separate from
+  `UsageStore` (that's per-*user* LLM tokens; this is per-*API* call volume). `hit("2gis")` in
+  `twogis.fetch`, `hit("osm")` in `OverpassClient._post`; shown in **`/usage`** (🤖 LLM from
+  UsageStore · 🗺 2GIS · 🧭 OSM) to watch the 2GIS demo quota / Overpass rate limit.
+
 ## LLM providers (Strategy pattern — `app/llm.py`)
 
 Provider is pluggable via a registry. **Add a provider = one decorated function**, no central

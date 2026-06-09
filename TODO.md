@@ -5,6 +5,16 @@ See `CLAUDE.md` (architecture) and `DESIGN.md` (capture pipeline).
 
 ## Next up
 
+### 0. OSM harvest — finish prod rollout (code on branch `feat/osm-harvest`)
+Code done (`app/osm.py`, `app/osm_tags.py`, `app/handlers/harvest.py`, enrichment hook,
+dedup by `osmId`, tests). **DONE:** (a) `osmId` TEXT field + `OSM` source option added to
+Lead+Company via Metadata API on the live CRM; (b) Overpass live on **netcup-observ**
+(`/opt/overpass`, KZ extract imported, `area["name"="Алматы"]` → 683 cafes); (c) forward-only
+SSH tunnel CRM→observ (systemd `overpass-tunnel.service`). **REMAINING:** set
+`OVERPASS_URL=http://127.0.0.1:12347/api/interpreter` in `/opt/lead-bot/.env`; merge the branch
+(CI builds the new image with the OSM code → `/harvest` goes live). Then verify `/harvest cafe →
+Алматы` + a text-capture enrichment in Telegram. Tune `NICHE_TAG_MAP` from results.
+
 ### 1. Ollama server (provider already coded — `@provider("ollama")`)
 Stand up Ollama behind nginx at `https://llm.suslicketeam.com/v1` (OpenAI-compat), optional
 bearer. Candidate host: **netcup-observ** (62 GB / 16 cores, no GPU → CPU inference, pick a
