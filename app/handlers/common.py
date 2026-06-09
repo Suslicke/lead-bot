@@ -25,7 +25,9 @@ HELP = (
     "/source — list sources · /source add &lt;name&gt;\n"
     "/usage — LLM tokens/requests today · /llm set req|tok &lt;n&gt; — daily caps\n"
     "/convert — turn a replied/qualified lead into Company + Opportunity\n"
+    "/harvest — find leads from OpenStreetMap (pick a niche → a city)\n"
     "/currency — default deal currency (e.g. /currency USD)\n"
+    "/members — who can use the bot · /members add &lt;id&gt; (admins only)\n"
     "/settings — show config"
 )
 

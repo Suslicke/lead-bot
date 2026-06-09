@@ -83,6 +83,7 @@ _DEFAULTS = {
     "llm_max_requests": 200,
     "llm_max_tokens": 300_000,
     "deal_currency": "KZT",  # default currency for opportunities created by /convert
+    "members": [],           # extra allowed Telegram ids (added at runtime via /members)
 }
 
 
@@ -154,3 +155,26 @@ class ConfigStore:
             raise ValueError(f"unsupported currency {code!r}; pick one of {', '.join(CURRENCIES)}")
         self._data["deal_currency"] = code
         self._save()
+
+    # --- runtime-added allowed users (the env ALLOWED_TELEGRAM_IDS are the admins) ---
+    @property
+    def members(self) -> list[int]:
+        return [int(x) for x in self._data.get("members", [])]
+
+    def add_member(self, uid: int) -> bool:
+        """Add a Telegram id to the allowlist. Returns False if already present."""
+        ids = self.members
+        if int(uid) in ids:
+            return False
+        self._data["members"] = sorted(set(ids) | {int(uid)})
+        self._save()
+        return True
+
+    def remove_member(self, uid: int) -> bool:
+        """Remove a runtime-added id. Returns False if it wasn't there."""
+        ids = self.members
+        if int(uid) not in ids:
+            return False
+        self._data["members"] = [x for x in ids if x != int(uid)]
+        self._save()
+        return True

@@ -1,8 +1,8 @@
 """Feature routers. main wires these into the dispatcher (whitelist applied to each)."""
 from aiogram import Router
 
-from . import (capture, cards, common, convert, digest, edit, harvest, kpi, menu,
-               queries, reference, usage)
+from . import (capture, cards, common, convert, digest, edit, harvest, kpi,
+               members, menu, queries, reference, usage)
 
 
 def get_routers() -> list[Router]:
@@ -11,4 +11,4 @@ def get_routers() -> list[Router]:
     # as a new lead.
     return [menu.router, common.router, edit.router, harvest.router, capture.router,
             queries.router, kpi.router, digest.router, reference.router, usage.router,
-            convert.router, cards.router]
+            convert.router, cards.router, members.router]

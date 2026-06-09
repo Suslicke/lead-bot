@@ -18,7 +18,7 @@ NAV = {
 def main_kb() -> ReplyKeyboardMarkup:
     """Persistent bottom panel with the most-used actions (typing still adds a lead)."""
     rows = [["📅 Today", "📊 Pipeline"], ["➡️ Convert", "💱 Currency"],
-            ["🏷 Niches", "📈 Usage"], ["❔ Help"]]
+            ["🏷 Niches", "📈 Usage"], ["🌍 Harvest", "❔ Help"]]
     return ReplyKeyboardMarkup(
         keyboard=[[KeyboardButton(text=t) for t in row] for row in rows],
         resize_keyboard=True, is_persistent=True,

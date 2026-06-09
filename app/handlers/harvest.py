@@ -39,9 +39,11 @@ def _niche_choices(options: OptionsRegistry) -> list[str]:
     return [n for n in harvestable_niches() if n in live] or harvestable_niches()
 
 
-@router.message(Command("harvest"))
-async def harvest_start(message: Message, overpass: OverpassClient | None,
-                        options: OptionsRegistry, state: FSMContext) -> None:
+HARVEST_BTN = "🌍 Harvest"  # bottom-panel button (keyboards.main_kb) → same as /harvest
+
+
+async def _open(message: Message, overpass: OverpassClient | None,
+                options: OptionsRegistry, state: FSMContext) -> None:
     if overpass is None:
         await message.answer("🌍 OSM harvest is off (OVERPASS_URL not set).")
         return
@@ -50,6 +52,20 @@ async def harvest_start(message: Message, overpass: OverpassClient | None,
         "🌍 <b>Harvest leads from OpenStreetMap</b>\nPick a niche:",
         reply_markup=harvest_niche_kb(_niche_choices(options)),
     )
+
+
+@router.message(Command("harvest"))
+async def harvest_command(message: Message, overpass: OverpassClient | None,
+                          options: OptionsRegistry, state: FSMContext) -> None:
+    await _open(message, overpass, options, state)
+
+
+# Bottom-panel tap arrives as plain text; this router runs before capture's catch-all,
+# and the button label isn't in menu.NAV, so menu doesn't intercept it.
+@router.message(F.text == HARVEST_BTN)
+async def harvest_button(message: Message, overpass: OverpassClient | None,
+                         options: OptionsRegistry, state: FSMContext) -> None:
+    await _open(message, overpass, options, state)
 
 
 @router.callback_query(F.data == "hvcancel")
