@@ -44,12 +44,14 @@ SYSTEM = (
     "or the link in 'notes' — leave 'notes' empty if there is nothing extra. "
     "Set 'language' to the language(s) you'd actually message this business in (RU/KK/EN) — "
     "infer from the business name, the note's language and the city; in Almaty it's usually "
-    "RU, add KK for a clearly Kazakh brand, EN only for an international one. It can be several."
+    "RU, add KK for a clearly Kazakh brand, EN only for an international one. It can be several. "
+    "If the note describes SEVERAL distinct businesses, return one entry per business in 'leads' "
+    "(split by separate 2GIS links / lines); usually it's just one."
 )
 
-# Shared JSON schema for the extracted fields (used as Anthropic tool input_schema
-# and as Cloudflare response_format json_schema).
-SCHEMA = {
+# One extracted business. The model returns a LIST of these (`SCHEMA` below) so a single
+# message can carry several leads. Used as Anthropic tool input_schema + Cloudflare json_schema.
+_LEAD = {
     "type": "object",
     "properties": {
         "name": {"type": "string", "description": "Business name"},
@@ -71,6 +73,14 @@ SCHEMA = {
     "required": ["name", "niche", "hasWebsite", "source"],
 }
 
+# Top-level result: a list of leads (≥1). capture() tolerates a flat lead too (defensive).
+SCHEMA = {
+    "type": "object",
+    "properties": {"leads": {"type": "array", "minItems": 1, "items": _LEAD,
+                             "description": "one entry per distinct business in the note (usually one)"}},
+    "required": ["leads"],
+}
+
 
 def schema_with_options(niche: list[str], source: list[str]) -> dict:
     """SCHEMA with the niche/source enums swapped for the live options from the registry.
@@ -79,10 +89,11 @@ def schema_with_options(niche: list[str], source: list[str]) -> dict:
     the model always sees *some* valid vocabulary.
     """
     schema = copy.deepcopy(SCHEMA)
+    item = schema["properties"]["leads"]["items"]["properties"]
     if niche:
-        schema["properties"]["niche"]["enum"] = niche
+        item["niche"]["enum"] = niche
     if source:
-        schema["properties"]["source"]["enum"] = source
+        item["source"]["enum"] = source
     return schema
 
 

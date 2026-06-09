@@ -7,8 +7,14 @@ router = Router()
 
 HELP = (
     "<b>Lead-bot</b> — your sales command center.\n\n"
-    "📝 <b>Add a lead:</b> just send a 2GIS link + facts:\n"
-    "<i>https://2gis.kz/... барбершоп на Абая, ~250 отзывов, без сайта</i>\n\n"
+    "📝 <b>Add a lead</b> — send free text (RU/KK/EN), no strict format. Useful to include:\n"
+    "  • name + niche (cafe / beauty / dental…)\n"
+    "  • the 2GIS (or other) link\n"
+    "  • ~reviews, rating, has a site or not\n"
+    "  • contact (wa.me / instagram / phone)\n"
+    "<i>e.g. https://2gis.kz/almaty/firm/… Барбершоп Chop, ~250 отзывов 4.8, без сайта, wa.me/7707…</i>\n"
+    "The bot fills the fields → you confirm. <b>Several at once:</b> paste each business on its own "
+    "line / link — it parses them all and offers <i>Create all</i>.\n\n"
     "📊 <b>Commands</b>\n"
     "/today — due follow-ups + KPI\n"
     "/pipeline — counts per stage\n"

@@ -38,6 +38,14 @@ def dup_kb(pending_id: str) -> InlineKeyboardMarkup:
     ]])
 
 
+def batch_kb(pending_id: str, n_new: int) -> InlineKeyboardMarkup:
+    """Several leads parsed from one message → create all the new ones at once."""
+    return InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text=f"✅ Create all ({n_new})", callback_data=f"createall:{pending_id}"),
+        InlineKeyboardButton(text="✖️ Cancel", callback_data=f"cancel:{pending_id}"),
+    ]])
+
+
 def convert_kb(leads: list[dict]) -> InlineKeyboardMarkup:
     """One button per convertible lead → Company + Opportunity (callback conv:<leadId>)."""
     rows = [[InlineKeyboardButton(text=f"➡️ {l.get('name') or 'Unnamed'}",
