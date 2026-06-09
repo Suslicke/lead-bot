@@ -18,6 +18,7 @@ from ..keyboards import batch_kb, confirm_kb, dup_kb
 from ..llm import Extractor, schema_with_options
 from ..reference import OptionsRegistry
 from ..twenty import TwentyClient, to_payload
+from ..twogis import TwoGisClient, find_firms
 from ..usage import UsageStore
 
 log = logging.getLogger(__name__)
@@ -78,9 +79,69 @@ def _dedupe_within(payloads: list[dict]) -> list[dict]:
     return out
 
 
+async def _present_drafts(note: Message, payloads: list[dict], twenty: TwentyClient) -> None:
+    """Dedup against the CRM and present: one lead → rich draft; many → 'Create all'."""
+    try:
+        known = await twenty.all_leads()
+    except Exception:  # noqa: BLE001 — dedup is best-effort; never block capture
+        known = []
+        log.exception("dedup fetch failed")
+
+    if len(payloads) == 1:  # single lead → rich draft with Update/Create-new on a dup
+        payload = payloads[0]
+        existing = find_duplicate(known, payload)
+        pid = uuid.uuid4().hex[:12]
+        _pending[pid] = {"payload": payload, "existing": existing.get("id") if existing else None}
+        if existing:
+            head = (f"⚠️ Похоже, уже в CRM: <b>{existing.get('name')}</b> "
+                    f"(stage: {existing.get('stage')})\n\n")
+            kb = dup_kb(pid)
+        else:
+            head, kb = "", confirm_kb(pid)
+        await note.edit_text(head + "Draft lead:\n\n" + _preview(payload), reply_markup=kb)
+        return
+
+    # several businesses → compact summary + "Create all" (dups skipped)
+    entries = [{"payload": p, "existing": (e.get("id") if (e := find_duplicate(known, p)) else None)}
+               for p in payloads]
+    pid = uuid.uuid4().hex[:12]
+    _batch[pid] = entries
+    n_new = sum(1 for e in entries if not e["existing"])
+    lines = [f"<b>{len(entries)} leads</b> parsed — {n_new} new, {len(entries) - n_new} already in CRM:", ""]
+    for i, e in enumerate(entries, 1):
+        p = e["payload"]
+        lines.append(f"{i}. <b>{p['name']}</b> — {p['niche']}/{p['source']}"
+                     + ("  ⚠️ dup" if e["existing"] else ""))
+    await note.edit_text("\n".join(lines), reply_markup=batch_kb(pid, n_new))
+
+
 @router.message(F.text & ~F.text.startswith("/"))
 async def capture(message: Message, extractor: Extractor, twenty: TwentyClient,
-                  options: OptionsRegistry, config: ConfigStore, usage: UsageStore) -> None:
+                  options: OptionsRegistry, config: ConfigStore, usage: UsageStore,
+                  twogis: TwoGisClient | None) -> None:
+    nm, sm = options.value_map("niche"), options.value_map("source")
+
+    # 2GIS link path (gated on TWOGIS_API_KEY): enrich each firm via the Catalog API, no LLM.
+    firms = find_firms(message.text) if twogis else []
+    if firms:
+        note = await message.answer("⏳ 2GIS…")
+        payloads = []
+        for firm_id, link in firms:
+            try:
+                fields = await twogis.fetch(firm_id, link)
+            except Exception:  # noqa: BLE001
+                log.exception("2gis fetch failed (%s)", firm_id)
+                fields = None
+            if fields:
+                payloads.append(to_payload(fields, nm, sm))
+        payloads = _dedupe_within(payloads)
+        if not payloads:
+            await note.edit_text("⚠️ 2GIS lookup failed — send the facts as text instead.")
+            return
+        await _present_drafts(note, payloads, twenty)
+        return
+
+    # text → LLM path (token cap applies; one call may yield several leads)
     uid = message.from_user.id
     over = usage.over_limit(uid, config.llm_max_requests, config.llm_max_tokens)
     if over:  # hard stop before spending another LLM call
@@ -97,7 +158,6 @@ async def capture(message: Message, extractor: Extractor, twenty: TwentyClient,
         raw = result.fields
         # the model returns {"leads": [...]}; tolerate a flat single lead too (defensive)
         items = raw["leads"] if isinstance(raw.get("leads"), list) and raw["leads"] else [raw]
-        nm, sm = options.value_map("niche"), options.value_map("source")
         payloads = _dedupe_within([to_payload(it, nm, sm) for it in items if isinstance(it, dict)])
     except Exception as e:  # noqa: BLE001
         log.exception("extract failed")
@@ -106,38 +166,7 @@ async def capture(message: Message, extractor: Extractor, twenty: TwentyClient,
     if not payloads:
         await note.edit_text("⚠️ No business found in that. Add the name + niche.")
         return
-
-    try:
-        known = await twenty.all_leads()
-    except Exception:  # noqa: BLE001 — dedup is best-effort; never block capture
-        known, _ = [], log.exception("dedup fetch failed")
-
-    if len(payloads) == 1:  # single lead → rich draft with Update/Create-new on a dup
-        payload = payloads[0]
-        existing = find_duplicate(known, payload)
-        pid = uuid.uuid4().hex[:12]
-        _pending[pid] = {"payload": payload, "existing": existing.get("id") if existing else None}
-        if existing:
-            head = (f"⚠️ Похоже, уже в CRM: <b>{existing.get('name')}</b> "
-                    f"(stage: {existing.get('stage')})\n\n")
-            kb = dup_kb(pid)
-        else:
-            head, kb = "", confirm_kb(pid)
-        await note.edit_text(head + "Draft lead:\n\n" + _preview(payload), reply_markup=kb)
-        return
-
-    # several businesses in one message → compact summary + "Create all" (dups skipped)
-    entries = [{"payload": p, "existing": (e.get("id") if (e := find_duplicate(known, p)) else None)}
-               for p in payloads]
-    pid = uuid.uuid4().hex[:12]
-    _batch[pid] = entries
-    n_new = sum(1 for e in entries if not e["existing"])
-    lines = [f"<b>{len(entries)} leads</b> parsed — {n_new} new, {len(entries) - n_new} already in CRM:", ""]
-    for i, e in enumerate(entries, 1):
-        p = e["payload"]
-        lines.append(f"{i}. <b>{p['name']}</b> — {p['niche']}/{p['source']}"
-                     + ("  ⚠️ dup" if e["existing"] else ""))
-    await note.edit_text("\n".join(lines), reply_markup=batch_kb(pid, n_new))
+    await _present_drafts(note, payloads, twenty)
 
 
 @router.callback_query(F.data.startswith("cancel:"))

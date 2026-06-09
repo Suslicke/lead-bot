@@ -77,6 +77,23 @@ metadata hiccup degrades to old behaviour instead of mapping everything to OTHER
 - Verified live (query + add + restore) with the **bot's own** Twenty key — that key has metadata-write perms.
   Known ids: Lead object `52b9769d-…-78f6ed3098f8`; `niche` field `5577b72c-…`, `source` `27af265a-…`.
 
+### 2GIS link enrichment (`app/twogis.py`, gated on `TWOGIS_API_KEY`)
+
+Paste a 2GIS link → the bot pulls the facts itself (no LLM, no browser). `capture` detects
+`firm/<id>` links (`find_firms`); if `TWOGIS_API_KEY` is set it calls the **Catalog API**
+(`/3.0/items/byid`, `fields=items.reviews,items.rubrics,items.contact_groups,items.address,…`)
+per firm and shapes the result **like the LLM's output dict** (`item_to_fields` → labels, not
+VALUEs, so `to_payload` maps them unchanged). Rubric → niche via the `_RUBRIC_NICHE` keyword map
+(unknown → "Other"). Then the same single/batch `_present_drafts` flow. **Unset key → the whole
+branch is skipped** (`dp["twogis"]=None`), behaviour identical to text+LLM.
+
+- **Why no keyless / headless** (tested empirically, don't re-litigate): a raw fetch of a 2GIS
+  firm page is an anti-bot SPA shell (no data, no key); a headless Playwright render from the VPS
+  IP gets a **2GIS CAPTCHA** (datacenter IP blocked); and the box has ~870 MB free RAM, no swap, so
+  Chromium-per-capture would OOM-risk the CRM. The Catalog API (a **free demo key** works) is the
+  only robust path. `reviews`/`rating` may be an on-demand (paid) field on some 2GIS plans —
+  enrichment degrades gracefully without it.
+
 ## LLM providers (Strategy pattern — `app/llm.py`)
 
 Provider is pluggable via a registry. **Add a provider = one decorated function**, no central

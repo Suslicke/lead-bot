@@ -33,6 +33,7 @@ from .reference import OptionsRegistry
 from .scheduler import DigestScheduler
 from .stats import StatsService
 from .twenty import TwentyClient
+from .twogis import TwoGisClient
 from .usage import UsageStore
 
 log = logging.getLogger("lead-bot")
@@ -58,6 +59,7 @@ async def main() -> None:
     stats = StatsService(twenty, config, settings.tz)
     options = OptionsRegistry(twenty)
     await options.refresh()  # seed niche/source from Twenty (best-effort; falls back to hardcoded)
+    twogis = TwoGisClient(settings.twogis_api_key, settings.twogis_api_url) if settings.twogis_api_key else None
     bot = Bot(token=settings.bot_token, default=DefaultBotProperties(parse_mode="HTML"))
     scheduler = DigestScheduler(settings.tz, config, stats, bot, settings.allowed_ids)
 
@@ -71,6 +73,7 @@ async def main() -> None:
     dp["stats"] = stats
     dp["scheduler"] = scheduler
     dp["options"] = options
+    dp["twogis"] = twogis
 
     whitelist = Whitelist(settings.allowed_ids)
     for router in get_routers():
@@ -80,8 +83,9 @@ async def main() -> None:
 
     scheduler.start()
     await bot.set_my_commands([BotCommand(command=c, description=d) for c, d in _COMMANDS])
-    log.info("lead-bot up (whitelist=%s, model=%s, twenty=%s)",
-             sorted(settings.allowed_ids) or "OPEN(!)", settings.model, settings.twenty_api_url)
+    log.info("lead-bot up (whitelist=%s, model=%s, twenty=%s, 2gis=%s)",
+             sorted(settings.allowed_ids) or "OPEN(!)", settings.model, settings.twenty_api_url,
+             "on" if twogis else "off")
     await dp.start_polling(bot)
 
 

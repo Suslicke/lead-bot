@@ -28,6 +28,8 @@ class Settings:
     llm_api_key: str | None = None           # aigateway provider key / ollama bearer token (nginx)
     ollama_base_url: str | None = None       # ollama: self-hosted OpenAI-compat base, e.g. https://llm.suslicketeam.com/v1
     sentry_dsn: str | None = None            # optional — unset disables Sentry
+    twogis_api_key: str | None = None        # optional — unset disables 2GIS link enrichment
+    twogis_api_url: str = "https://catalog.api.2gis.com"
 
     @staticmethod
     def from_env() -> "Settings":
@@ -65,6 +67,8 @@ class Settings:
             llm_api_key=os.environ.get("LLM_API_KEY") or None,
             ollama_base_url=os.environ.get("OLLAMA_BASE_URL") or None,
             sentry_dsn=os.environ.get("SENTRY_DSN") or None,
+            twogis_api_key=os.environ.get("TWOGIS_API_KEY") or None,
+            twogis_api_url=os.environ.get("TWOGIS_API_URL", "https://catalog.api.2gis.com").rstrip("/"),
         )
 
 
