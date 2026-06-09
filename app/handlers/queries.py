@@ -5,13 +5,14 @@ from aiogram.types import Message
 
 from ..stats import StatsService
 from ..twenty import STAGE_LABEL, STAGE_ORDER
+from .cards import card_kb
 
 router = Router()
 
 
 @router.message(Command("today"))
 async def today(message: Message, stats: StatsService) -> None:
-    await message.answer(await stats.status_text("📅 Today"))
+    await message.answer(await stats.status_text("📅 Today"), reply_markup=card_kb())
 
 
 @router.message(Command("pipeline"))

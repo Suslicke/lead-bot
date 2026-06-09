@@ -25,6 +25,7 @@ _COMMANDS = [
     ("help", "Help"),
 ]
 
+from . import metrics
 from .config import ConfigStore, Settings
 from .filters import Whitelist
 from .handlers import get_routers
@@ -55,6 +56,7 @@ async def main() -> None:
     # --- build dependencies ---
     config = ConfigStore(settings.config_path)
     usage = UsageStore(settings.usage_path, settings.tz)
+    metrics.init(settings.usage_path.parent / "api.json", settings.tz)  # per-API daily counters
     twenty = TwentyClient(settings.twenty_api_url, settings.twenty_api_key)
     extractor = build_extractor(settings)
     stats = StatsService(twenty, config, settings.tz)

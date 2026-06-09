@@ -31,6 +31,22 @@ def progress_bar(done: int, goal: int, width: int = 10) -> str:
     return "▰" * filled + "▱" * (width - filled)
 
 
+_PARTIAL = "▏▎▍▌▋▊▉"  # 1/8 .. 7/8 block fills, for a smooth proportional bar
+
+
+def bar(value: int, peak: int, width: int = 12) -> str:
+    """A proportional block bar (value/peak), padded to `width` for monospace alignment."""
+    if peak <= 0 or value <= 0:
+        return " " * width
+    units = width * value / peak
+    full = int(units)
+    rem = units - full
+    out = "█" * full
+    if full < width and rem > 0:
+        out += _PARTIAL[min(len(_PARTIAL) - 1, int(rem * 8))]
+    return out[:width].ljust(width)
+
+
 def valid_hhmm(s: str) -> bool:
     try:
         h, m = s.split(":")

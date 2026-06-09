@@ -130,6 +130,22 @@ Makes the bot a **source** of leads, not just a logger. Two modes, both off when
   (and mirror it onto Company), *before* deploying — Twenty rejects unknown fields on `/rest/leads`.
 - Design: website repo `docs/plans/2026-06-09-lead-bot-osm-design.md`.
 
+### /today stats card + API metrics (`app/stats.py`, `app/card.py`, `app/metrics.py`)
+
+- **`StatsService.today_data()`** is the single source of the numbers (counts/sources/due/created/
+  conv/goal); **both** renderers consume it. `status_text()` renders a text card — a monospace
+  `<pre>` **funnel** (`timeutil.bar`, proportional) + conversion + source split + KPI bar.
+- **`card.py`** renders the same data as a **PNG** in the *site palette* (dark + violet brand —
+  the real `globals.css` oklch tokens, converted oklch→sRGB in-module). Pillow only (no browser —
+  light enough for the box, unlike Chromium). Font: `fonts-dejavu-core` (added to the Dockerfile;
+  falls back to Pillow's default). `/today` (and the menu hub) attach a **🖼 Card** inline button
+  (`handlers/cards.py`, `today_card` callback) → renders off-thread (`asyncio.to_thread`) →
+  `answer_photo`.
+- **`metrics.py`** — a process-global daily per-API counter (`data/api.json`), separate from
+  `UsageStore` (that's per-*user* LLM tokens; this is per-*API* call volume). `hit("2gis")` in
+  `twogis.fetch`, `hit("osm")` in `OverpassClient._post`; shown in **`/usage`** (🤖 LLM from
+  UsageStore · 🗺 2GIS · 🧭 OSM) to watch the 2GIS demo quota / Overpass rate limit.
+
 ## LLM providers (Strategy pattern — `app/llm.py`)
 
 Provider is pluggable via a registry. **Add a provider = one decorated function**, no central

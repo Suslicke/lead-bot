@@ -4,3 +4,4 @@ httpx>=0.27
 APScheduler>=3.10,<4
 tzdata>=2024.1
 sentry-sdk>=2.0
+Pillow>=10.4          # render the /today stats card (PNG)

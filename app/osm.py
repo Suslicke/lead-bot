@@ -15,6 +15,7 @@ from dataclasses import dataclass
 
 import httpx
 
+from . import metrics
 from .osm_tags import build_name_query, build_query, tags_for
 
 log = logging.getLogger(__name__)
@@ -124,6 +125,7 @@ class OverpassClient:
 
     async def _post(self, query: str) -> dict:
         """One Overpass request with a single retry (a cold/self-hosted instance is slow)."""
+        metrics.hit("osm")  # count the call (Overpass is rate-limited; watch via /usage)
         last: Exception | None = None
         for attempt in range(2):
             try:
