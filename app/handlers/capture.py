@@ -11,10 +11,12 @@ import logging
 import uuid
 
 from aiogram import F, Router
+from aiogram.filters import StateFilter
 from aiogram.types import CallbackQuery, Message
 
+from .. import draft
 from ..config import ConfigStore, Settings
-from ..keyboards import batch_kb, confirm_kb, dup_kb
+from ..keyboards import batch_kb, edit_kb
 from ..llm import Extractor, schema_with_options
 from ..reference import OptionsRegistry
 from ..twenty import TwentyClient, to_payload
@@ -24,28 +26,11 @@ from ..usage import UsageStore
 log = logging.getLogger(__name__)
 router = Router()
 
-# in-memory drafts awaiting confirmation: pid -> {"payload": dict, "existing": id|None}
-_pending: dict[str, dict] = {}
-# in-memory batch drafts (several leads from one message): pid -> [{"payload", "existing"}]
-_batch: dict[str, list[dict]] = {}
+# Drafts awaiting confirmation now live in draft.PENDING / draft.BATCH (shared with edit.py).
 
 # fields a re-scan may refresh on an existing lead (facts, not pipeline state)
 _REFRESHABLE = ("niche", "hasWebsite", "city", "contact", "prospectLink",
                 "addressText", "reviewsCount", "rating", "language")
-
-
-def _preview(p: dict) -> str:
-    return (
-        f"<b>{p['name']}</b>\n"
-        f"Niche: {p['niche']}   City: {p['city']}   Lang: {', '.join(p.get('language') or ['—'])}\n"
-        f"Has website: {p['hasWebsite']}   Source: {p['source']}\n"
-        f"Reviews: {p.get('reviewsCount', '—')}   Rating: {p.get('rating', '—')}\n"
-        f"Address: {p.get('addressText', '—')}\n"
-        f"Contact: {p.get('contact', '—')}\n"
-        f"Link: {p.get('prospectLink', '—')}\n"
-        f"Next step: {p.get('nextStep', '—')}\n"
-        f"Notes: {p.get('notes', '—')}"
-    )
 
 
 def _norm(url: str | None) -> str:
@@ -87,35 +72,31 @@ async def _present_drafts(note: Message, payloads: list[dict], twenty: TwentyCli
         known = []
         log.exception("dedup fetch failed")
 
-    if len(payloads) == 1:  # single lead → rich draft with Update/Create-new on a dup
+    if len(payloads) == 1:  # single lead → rich editable draft (Update/Create-new on a dup)
         payload = payloads[0]
         existing = find_duplicate(known, payload)
         pid = uuid.uuid4().hex[:12]
-        _pending[pid] = {"payload": payload, "existing": existing.get("id") if existing else None}
-        if existing:
-            head = (f"⚠️ Похоже, уже в CRM: <b>{existing.get('name')}</b> "
-                    f"(stage: {existing.get('stage')})\n\n")
-            kb = dup_kb(pid)
-        else:
-            head, kb = "", confirm_kb(pid)
-        await note.edit_text(head + "Draft lead:\n\n" + _preview(payload), reply_markup=kb)
+        dup = (f"{existing.get('name')} (stage: {existing.get('stage')})" if existing else None)
+        draft.PENDING[pid] = {
+            "payload": payload,
+            "existing": existing.get("id") if existing else None,
+            "dup": dup,
+            "msg_id": note.message_id,
+        }
+        head = f"⚠️ Already in CRM: {dup}\n\n" if dup else ""
+        await note.edit_text(head + "Draft lead:\n\n" + draft.preview(payload),
+                             reply_markup=edit_kb(pid, payload))
         return
 
-    # several businesses → compact summary + "Create all" (dups skipped)
+    # several businesses → navigable summary (✏️ per lead) + "Create all" (dups skipped)
     entries = [{"payload": p, "existing": (e.get("id") if (e := find_duplicate(known, p)) else None)}
                for p in payloads]
     pid = uuid.uuid4().hex[:12]
-    _batch[pid] = entries
-    n_new = sum(1 for e in entries if not e["existing"])
-    lines = [f"<b>{len(entries)} leads</b> parsed — {n_new} new, {len(entries) - n_new} already in CRM:", ""]
-    for i, e in enumerate(entries, 1):
-        p = e["payload"]
-        lines.append(f"{i}. <b>{p['name']}</b> — {p['niche']}/{p['source']}"
-                     + ("  ⚠️ dup" if e["existing"] else ""))
-    await note.edit_text("\n".join(lines), reply_markup=batch_kb(pid, n_new))
+    draft.BATCH[pid] = {"items": entries, "msg_id": note.message_id}
+    await note.edit_text(draft.batch_summary(entries), reply_markup=batch_kb(pid, entries))
 
 
-@router.message(F.text & ~F.text.startswith("/"))
+@router.message(StateFilter(None), F.text & ~F.text.startswith("/"))
 async def capture(message: Message, extractor: Extractor, twenty: TwentyClient,
                   options: OptionsRegistry, config: ConfigStore, usage: UsageStore,
                   twogis: TwoGisClient | None) -> None:
@@ -172,19 +153,20 @@ async def capture(message: Message, extractor: Extractor, twenty: TwentyClient,
 @router.callback_query(F.data.startswith("cancel:"))
 async def cancel(callback: CallbackQuery) -> None:
     pid = callback.data.split(":", 1)[1]
-    _pending.pop(pid, None)
-    _batch.pop(pid, None)
+    draft.PENDING.pop(pid, None)
+    draft.BATCH.pop(pid, None)
     await callback.message.edit_text("✖️ Cancelled.")
     await callback.answer()
 
 
 @router.callback_query(F.data.startswith("createall:"))
 async def create_all(callback: CallbackQuery, twenty: TwentyClient) -> None:
-    entries = _batch.pop(callback.data.split(":", 1)[1], None)
-    if not entries:
+    batch = draft.BATCH.pop(callback.data.split(":", 1)[1], None)
+    if not batch:
         await callback.message.edit_text("⌛ Session expired — please resend the leads.")
         await callback.answer()
         return
+    entries = batch["items"]
     created, skipped, failed, names = 0, 0, 0, []
     for e in entries:
         if e["existing"]:  # dups are skipped in batch (single-lead flow handles update)
@@ -211,7 +193,7 @@ async def create_all(callback: CallbackQuery, twenty: TwentyClient) -> None:
 
 @router.callback_query(F.data.startswith("create:"))
 async def create(callback: CallbackQuery, twenty: TwentyClient, settings: Settings) -> None:
-    entry = _pending.pop(callback.data.split(":", 1)[1], None)
+    entry = draft.PENDING.pop(callback.data.split(":", 1)[1], None)
     if not entry:
         await callback.message.edit_text("⌛ Session expired — please resend the lead.")
         await callback.answer()
@@ -229,7 +211,7 @@ async def create(callback: CallbackQuery, twenty: TwentyClient, settings: Settin
 
 @router.callback_query(F.data.startswith("update:"))
 async def update(callback: CallbackQuery, twenty: TwentyClient, settings: Settings) -> None:
-    entry = _pending.pop(callback.data.split(":", 1)[1], None)
+    entry = draft.PENDING.pop(callback.data.split(":", 1)[1], None)
     if not entry or not entry.get("existing"):
         await callback.message.edit_text("⌛ Session expired — please resend the lead.")
         await callback.answer()
