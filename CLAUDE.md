@@ -42,11 +42,13 @@ app/
   handlers/      menu · common · capture · queries · kpi · digest · reference · usage · convert
 ```
 
-- **menu.py** owns `/start` + `/menu` (an inline button **hub**: Today · Pipeline · Convert ·
-  Currency · Niches · Usage · Help) and the `menu:*` callbacks. Buttons re-run the same reads as
-  the typed commands (no logic dupe — e.g. it calls `convert.convertible()`) and post a *new*
-  message (not `edit_text`) so the hub stays put. `main` also calls `set_my_commands` so the full
-  command list shows in Telegram's blue "Menu".
+- **menu.py** owns `/start` + `/menu` → a **persistent bottom panel** (`keyboards.main_kb`,
+  ReplyKeyboard: Today · Pipeline · Convert · Currency · Niches · Usage · Help). A reply-button tap
+  arrives as plain **text** (its label), so the `F.text.in_(NAV)` handler must run *before*
+  capture's catch-all — `menu.router` is first in `get_routers()`, so it does. Both it and the
+  typed commands funnel through one `_run(action, …)` render (no logic dupe — e.g.
+  `convert.convertible()`). `main` also calls `set_my_commands` so the full command list shows in
+  Telegram's blue "Menu". (Per-message lists like the convert picker stay **inline** — `convert_kb`.)
 
 - **capture.py** is the core flow: text → `extractor.extract` (in a thread) → `to_payload`
   → **dedup** by `prospectLink` (then exact name) → preview with `confirm_kb` or `dup_kb`

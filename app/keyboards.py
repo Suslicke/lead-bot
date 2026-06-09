@@ -1,7 +1,26 @@
-"""Inline keyboards."""
+"""Inline keyboards (per-message actions) + the persistent bottom nav (ReplyKeyboard)."""
 from __future__ import annotations
 
-from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+from aiogram.types import (InlineKeyboardButton, InlineKeyboardMarkup,
+                           KeyboardButton, ReplyKeyboardMarkup)
+
+# Bottom nav: label -> hub action. Tapping a reply button SENDS its label as text, so menu.py
+# intercepts these exact labels (before capture's catch-all) and dispatches to the same render.
+NAV = {
+    "📅 Today": "today", "📊 Pipeline": "pipeline", "➡️ Convert": "convert",
+    "💱 Currency": "currency", "🏷 Niches": "niches", "📈 Usage": "usage", "❔ Help": "help",
+}
+
+
+def main_kb() -> ReplyKeyboardMarkup:
+    """Persistent bottom panel with the most-used actions (typing still adds a lead)."""
+    rows = [["📅 Today", "📊 Pipeline"], ["➡️ Convert", "💱 Currency"],
+            ["🏷 Niches", "📈 Usage"], ["❔ Help"]]
+    return ReplyKeyboardMarkup(
+        keyboard=[[KeyboardButton(text=t) for t in row] for row in rows],
+        resize_keyboard=True, is_persistent=True,
+        input_field_placeholder="Send a 2GIS link + facts to add a lead…",
+    )
 
 
 def confirm_kb(pending_id: str) -> InlineKeyboardMarkup:

@@ -1,18 +1,19 @@
-"""/start and /menu — an inline button hub that fronts the most-used commands.
+"""/start and /menu — a persistent bottom button panel (ReplyKeyboard) fronting the
+most-used commands.
 
-The hub is a thin convenience layer: each button re-runs the same read it would from the
-typed command (no duplicated business logic beyond a few render lines). Telegram's blue
-"Menu" button (set in main via set_my_commands) covers the full command list.
+Reply-keyboard taps arrive as plain text (the button label), so the NAV handler must run
+*before* capture's catch-all — `menu.router` is first in get_routers(), so it does. Each
+action re-runs the same read as the typed command (no logic dupe — e.g. convert.convertible()).
+Telegram's blue "Menu" button (set in main via set_my_commands) still lists every command.
 """
 from __future__ import annotations
 
 from aiogram import F, Router
 from aiogram.filters import Command, CommandStart
-from aiogram.types import (CallbackQuery, InlineKeyboardButton,
-                           InlineKeyboardMarkup, Message)
+from aiogram.types import Message
 
 from ..config import ConfigStore
-from ..keyboards import convert_kb
+from ..keyboards import NAV, convert_kb, main_kb
 from ..reference import OptionsRegistry
 from ..stats import StatsService
 from ..twenty import CURRENCIES, STAGE_LABEL, STAGE_ORDER, TwentyClient
@@ -22,33 +23,18 @@ from .convert import convertible
 
 router = Router()
 
-HUB = ("<b>Lead-bot</b> — command center\n\n"
-       "➕ <b>Add a lead:</b> just send a 2GIS link + facts.")
-
-
-def _hub_kb() -> InlineKeyboardMarkup:
-    b = InlineKeyboardButton
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [b(text="📅 Today", callback_data="menu:today"), b(text="📊 Pipeline", callback_data="menu:pipeline")],
-        [b(text="➡️ Convert", callback_data="menu:convert"), b(text="💱 Currency", callback_data="menu:currency")],
-        [b(text="🏷 Niches", callback_data="menu:niches"), b(text="📈 Usage", callback_data="menu:usage")],
-        [b(text="❔ Help", callback_data="menu:help")],
-    ])
+HUB = ("<b>Lead-bot</b> — command center.\n"
+       "Use the buttons below, or just send a 2GIS link + facts to add a lead.")
 
 
 @router.message(CommandStart())
 @router.message(Command("menu"))
 async def menu(message: Message) -> None:
-    await message.answer(HUB, reply_markup=_hub_kb())
+    await message.answer(HUB, reply_markup=main_kb())
 
 
-@router.callback_query(F.data.startswith("menu:"))
-async def hub_dispatch(callback: CallbackQuery, stats: StatsService, twenty: TwentyClient,
-                       config: ConfigStore, options: OptionsRegistry, usage: UsageStore) -> None:
-    action = callback.data.split(":", 1)[1]
-    await callback.answer()
-    send = callback.message.answer  # post a fresh message; leaves the hub intact
-
+async def _run(action: str, send, stats: StatsService, twenty: TwentyClient,
+               config: ConfigStore, options: OptionsRegistry, usage: UsageStore, uid: int) -> None:
     if action == "today":
         await send(await stats.status_text("📅 Today"))
     elif action == "pipeline":
@@ -70,8 +56,15 @@ async def hub_dispatch(callback: CallbackQuery, stats: StatsService, twenty: Twe
         await send(f"<b>Niches</b> ({len(labels)}):\n" + "\n".join(f"• {x}" for x in labels) +
                    "\n\nAdd: <code>/niche add &lt;name&gt;</code>")
     elif action == "usage":
-        t = usage.today(callback.from_user.id)
+        t = usage.today(uid)
         await send(f"📊 <b>Usage today</b>\nRequests: <b>{t['requests']}</b>   "
                    f"Tokens: <b>{t['total_tokens']}</b>  ·  see /usage")
     elif action == "help":
         await send(HELP)
+
+
+@router.message(F.text.in_(NAV))
+async def nav(message: Message, stats: StatsService, twenty: TwentyClient,
+              config: ConfigStore, options: OptionsRegistry, usage: UsageStore) -> None:
+    await _run(NAV[message.text], message.answer, stats, twenty, config, options, usage,
+               message.from_user.id)
