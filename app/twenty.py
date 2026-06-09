@@ -19,6 +19,11 @@ SOURCE = {"2GIS": "TWO_GIS", "Site": "SITE", "Instagram": "INSTAGRAM",
           "Referral": "REFERRAL", "Event": "EVENT", "Shirt": "SHIRT"}
 # language is a MULTI_SELECT on the Lead object — a lead can speak several (RU + KK).
 LANGUAGES = ("RU", "KK", "EN")
+# Opportunity.amount is multi-currency (currencyCode stored per record; amount * 1_000_000).
+# The bot picks a default at convert time (runtime-configurable, /currency); any single deal's
+# currency can still be changed in the CRM.
+DEFAULT_CURRENCY = "KZT"
+CURRENCIES = ("KZT", "RUB", "USD", "EUR", "GBP")
 
 STAGE_ORDER = ["TO_CONTACT", "CONTACTED", "REPLIED", "QUALIFIED", "PROPOSAL", "WON", "LOST"]
 STAGE_LABEL = {"TO_CONTACT": "To contact", "CONTACTED": "Contacted", "REPLIED": "Replied",
@@ -106,6 +111,69 @@ def to_payload(fields: dict, niche_map: dict | None = None, source_map: dict | N
     return payload
 
 
+# --- Lead -> relational layer (Company / Opportunity) -------------------------------------
+# A Lead record (as stored in Twenty) carries VALUE-form selects already; we only have to
+# re-shape the composite fields: Lead.prospectLink (TEXT) -> Company.prospectLink (LINKS),
+# Lead.city + addressText (TEXT) -> Company.address (ADDRESS), Lead.dealValue (NUMBER) ->
+# Opportunity.amount (CURRENCY). Selects/multiselect carry over verbatim (same option values).
+
+def to_company_payload(lead: dict) -> dict:
+    """Firmographics from a Lead record → a /rest/companies body."""
+    p: dict = {"name": lead.get("name") or "Unnamed company"}
+    for key in ("niche", "source", "hasWebsite", "contact"):
+        if lead.get(key):
+            p[key] = lead[key]
+    for key in ("reviewsCount", "rating"):
+        if lead.get(key) is not None:
+            p[key] = lead[key]
+    if lead.get("language"):
+        p["language"] = lead["language"]
+    if lead.get("prospectLink"):
+        p["prospectLink"] = {"primaryLinkUrl": lead["prospectLink"], "primaryLinkLabel": "2GIS"}
+    address = {}
+    if lead.get("addressText"):
+        address["addressStreet1"] = lead["addressText"]
+    if lead.get("city"):
+        address["addressCity"] = lead["city"]
+    if address:
+        address.setdefault("addressCountry", "Kazakhstan")
+        p["address"] = address
+    return p
+
+
+def to_opportunity_payload(lead: dict, company_id: str, currency: str = DEFAULT_CURRENCY) -> dict:
+    """The deal from a Lead record → a /rest/opportunities body (starts at QUALIFIED)."""
+    p: dict = {"name": lead.get("name") or "Opportunity", "stage": "QUALIFIED", "companyId": company_id}
+    deal = lead.get("dealValue")
+    if deal:
+        p["amount"] = {"amountMicros": int(float(deal) * 1_000_000), "currencyCode": currency}
+    if lead.get("nextStep"):
+        p["nextStep"] = lead["nextStep"]
+    return p
+
+
+def _link_url(value) -> str:
+    """Normalise a link for dedup — handles both TEXT and LINKS-composite shapes."""
+    if isinstance(value, dict):
+        value = value.get("primaryLinkUrl")
+    return (value or "").strip().rstrip("/").lower()
+
+
+def find_company(companies: list[dict], link: str | None, name: str | None) -> dict | None:
+    """Dedup a Company by 2GIS link (the natural key), then exact name."""
+    nlink = _link_url(link)
+    if nlink:
+        for c in companies:
+            if _link_url(c.get("prospectLink")) == nlink:
+                return c
+    nname = (name or "").strip().lower()
+    if nname:
+        for c in companies:
+            if (c.get("name") or "").strip().lower() == nname:
+                return c
+    return None
+
+
 class TwentyClient:
     def __init__(self, base_url: str, api_key: str):
         self._base = base_url
@@ -134,6 +202,33 @@ class TwentyClient:
         if r.status_code not in (200, 201):
             raise RuntimeError(f"Twenty {r.status_code}: {r.text[:200]}")
 
+    async def get_lead(self, lead_id: str) -> dict:
+        async with httpx.AsyncClient(timeout=15) as c:
+            r = await c.get(f"{self._base}/rest/leads/{lead_id}", headers=self._headers)
+        r.raise_for_status()
+        return r.json().get("data", {}).get("lead", {})
+
+    # --- relational layer (Company / Opportunity) -------------------------------------------
+    async def all_companies(self, limit: int = 200) -> list[dict]:
+        async with httpx.AsyncClient(timeout=15) as c:
+            r = await c.get(f"{self._base}/rest/companies?limit={limit}", headers=self._headers)
+        r.raise_for_status()
+        return r.json().get("data", {}).get("companies", [])
+
+    async def create_company(self, payload: dict) -> str:
+        async with httpx.AsyncClient(timeout=15) as c:
+            r = await c.post(f"{self._base}/rest/companies", headers=self._headers, json=payload)
+        if r.status_code != 201:
+            raise RuntimeError(f"Twenty {r.status_code}: {r.text[:200]}")
+        return r.json()["data"]["createCompany"]["id"]
+
+    async def create_opportunity(self, payload: dict) -> str:
+        async with httpx.AsyncClient(timeout=15) as c:
+            r = await c.post(f"{self._base}/rest/opportunities", headers=self._headers, json=payload)
+        if r.status_code != 201:
+            raise RuntimeError(f"Twenty {r.status_code}: {r.text[:200]}")
+        return r.json()["data"]["createOpportunity"]["id"]
+
     # --- Metadata API (/metadata GraphQL): the Select-option schema, not records ----------
     # The two GraphQL documents live at the bottom of this module (_FIELDS_Q / _UPDATE_FIELD_M)
     # so they're easy to tweak if a Twenty upgrade changes the metadata schema.
@@ -155,11 +250,14 @@ class TwentyClient:
                 return f["id"], list(f.get("options") or [])
         raise RuntimeError(f"field {field_name!r} not found on object {object_id}")
 
-    async def add_select_option(self, field_id: str, current: list[dict], label: str) -> str:
+    async def add_select_option(self, field_id: str, current: list[dict], label: str,
+                                value: str | None = None) -> str:
         """Append one option to a Select field (updateOneField replaces the whole array).
 
         We round-trip the existing options verbatim (keeping their ids) and append the new
-        one — dropping any of the existing options would delete it from the schema.
+        one — dropping any of the existing options would delete it from the schema. `value`
+        can be forced (to mirror the same option onto another object, e.g. Company.niche,
+        with an identical VALUE) instead of deriving it from the label.
         """
         if any(not o.get("id") for o in current):
             # Options without ids means we're working off the un-synced seed fallback, not the
@@ -167,7 +265,7 @@ class TwentyClient:
             raise RuntimeError("options not synced from Twenty — cannot safely add (try again)")
         taken = {o.get("value") for o in current}
         positions = [o.get("position", 0) for o in current]
-        new = {"id": str(uuid.uuid4()), "label": label, "value": _option_value(label, taken),
+        new = {"id": str(uuid.uuid4()), "label": label, "value": value or _option_value(label, taken),
                "color": _PALETTE[len(current) % len(_PALETTE)],
                "position": (max(positions) + 1) if positions else 0}
         options = [{k: o.get(k) for k in _OPTION_KEYS} for o in current] + [new]

@@ -21,6 +21,10 @@ LEAD_OBJECT_ID = "52b9769d-73ef-4d71-a99c-78f6ed3098f8"
 FIELD_IDS = {"niche": "5577b72c-0439-4e42-8ac4-66f133986369",
              "source": "27af265a-decf-4c34-b868-d639fe9609d3"}
 
+# Company mirrors the same niche/source options (so /convert can write them on the account).
+# A new option added via /niche add is mirrored here with the SAME value to keep them aligned.
+COMPANY_OBJECT_ID = "04c9d43d-24b2-4bfd-ae3f-435c44b03e7b"
+
 FIELDS = ("niche", "source")
 
 
@@ -60,5 +64,16 @@ class OptionsRegistry:
         if label in existing:
             return existing[label]
         value = await self._twenty.add_select_option(self._field_ids[field], self._options[field], label)
+        await self._mirror_to_company(field, label, value)
         await self.refresh()
         return value
+
+    async def _mirror_to_company(self, field: str, label: str, value: str) -> None:
+        """Add the same option (identical VALUE) to Company's matching field, so a later
+        /convert can write it on the account. Best-effort: never blocks the Lead-side add."""
+        try:
+            cfid, copts = await self._twenty.field_options(COMPANY_OBJECT_ID, field)
+            if label not in {o["label"] for o in copts}:
+                await self._twenty.add_select_option(cfid, copts, label, value=value)
+        except Exception:  # noqa: BLE001
+            log.exception("mirror %s=%s to Company failed", field, label)

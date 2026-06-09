@@ -18,6 +18,8 @@ HELP = (
     "/niche — list niches · /niche add &lt;name&gt; — new niche (LLM picks it up)\n"
     "/source — list sources · /source add &lt;name&gt;\n"
     "/usage — LLM tokens/requests today · /llm set req|tok &lt;n&gt; — daily caps\n"
+    "/convert — turn a replied/qualified lead into Company + Opportunity\n"
+    "/currency — default deal currency (e.g. /currency USD)\n"
     "/settings — show config"
 )
 

@@ -76,6 +76,7 @@ _DEFAULTS = {
     "digest_times": ["09:00", "19:00"],
     "llm_max_requests": 200,
     "llm_max_tokens": 300_000,
+    "deal_currency": "KZT",  # default currency for opportunities created by /convert
 }
 
 
@@ -134,4 +135,16 @@ class ConfigStore:
 
     def set_llm_max_tokens(self, value: int) -> None:
         self._data["llm_max_tokens"] = max(0, int(value))
+        self._save()
+
+    @property
+    def deal_currency(self) -> str:
+        return str(self._data["deal_currency"])
+
+    def set_deal_currency(self, code: str) -> None:
+        from .twenty import CURRENCIES
+        code = code.strip().upper()
+        if code not in CURRENCIES:
+            raise ValueError(f"unsupported currency {code!r}; pick one of {', '.join(CURRENCIES)}")
+        self._data["deal_currency"] = code
         self._save()
