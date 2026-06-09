@@ -10,8 +10,17 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from app.config import ConfigStore  # noqa: E402
-from app.handlers.kpi import _canonical_metric  # noqa: E402
+from app.handlers.kpi import _canonical_metric, panel_text  # noqa: E402
+from app.keyboards import kpi_kb, kpi_stage_kb  # noqa: E402
 from app.stats import resolve_kpi  # noqa: E402
+
+
+def _datas(kb):
+    return [b.callback_data for row in kb.inline_keyboard for b in row]
+
+
+def _texts(kb):
+    return [b.text for row in kb.inline_keyboard for b in row]
 
 _COUNTS = Counter({"TO_CONTACT": 6, "CONTACTED": 1, "QUALIFIED": 2, "WON": 3})
 
@@ -52,6 +61,27 @@ def test_canonical_metric_mapping():
     assert _canonical_metric("To contact") == "stage:TO_CONTACT"
     assert _canonical_metric("stage:replied") == "stage:REPLIED"
     assert _canonical_metric("garbage") is None
+
+
+def test_kpi_kb_marks_current_and_has_controls():
+    kb = kpi_kb("worked", 15)
+    assert any(t.startswith("✓ ") and "Worked" in t for t in _texts(kb))
+    ds = _datas(kb)
+    for cb in ("kpi:m:created", "kpi:m:worked", "kpi:m:won", "kpi:stage", "kpi:g:-5", "kpi:g:5"):
+        assert cb in ds
+    assert any("🎯 15" in t for t in _texts(kb))   # goal shown
+
+
+def test_kpi_stage_kb_marks_won_and_has_back():
+    kb = kpi_stage_kb("won")
+    assert any(t.startswith("✓ ") and "Won" in t for t in _texts(kb))
+    assert "kpi:back" in _datas(kb)
+    assert "kpi:s:QUALIFIED" in _datas(kb)
+
+
+def test_panel_text_shows_label_and_progress():
+    t = panel_text({"kpi_label": "worked today", "kpi_value": 5, "goal": 15})
+    assert "worked today" in t and "5/15" in t
 
 
 def _run_all():
