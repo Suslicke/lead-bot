@@ -6,6 +6,24 @@ import logging
 
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
+from aiogram.types import BotCommand
+
+# Shown in Telegram's blue "Menu" button (tap to run). Order = display order.
+_COMMANDS = [
+    ("menu", "Command hub (buttons)"),
+    ("today", "Due follow-ups + KPI"),
+    ("pipeline", "Counts per stage"),
+    ("leads", "List leads in a stage"),
+    ("convert", "Lead → Company + Opportunity"),
+    ("kpi", "Daily goal progress"),
+    ("digest", "Digest schedule"),
+    ("niche", "Niches (add new)"),
+    ("source", "Sources (add new)"),
+    ("currency", "Default deal currency"),
+    ("usage", "LLM usage today"),
+    ("settings", "Show config"),
+    ("help", "Help"),
+]
 
 from .config import ConfigStore, Settings
 from .filters import Whitelist
@@ -61,6 +79,7 @@ async def main() -> None:
         dp.include_router(router)
 
     scheduler.start()
+    await bot.set_my_commands([BotCommand(command=c, description=d) for c, d in _COMMANDS])
     log.info("lead-bot up (whitelist=%s, model=%s, twenty=%s)",
              sorted(settings.allowed_ids) or "OPEN(!)", settings.model, settings.twenty_api_url)
     await dp.start_polling(bot)

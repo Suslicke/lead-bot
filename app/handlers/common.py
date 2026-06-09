@@ -1,6 +1,6 @@
-"""/start and /help."""
+"""/help and the shared HELP text (/start + /menu live in menu.py as the button hub)."""
 from aiogram import Router
-from aiogram.filters import Command, CommandStart
+from aiogram.filters import Command
 from aiogram.types import Message
 
 router = Router()
@@ -22,11 +22,6 @@ HELP = (
     "/currency — default deal currency (e.g. /currency USD)\n"
     "/settings — show config"
 )
-
-
-@router.message(CommandStart())
-async def start(message: Message) -> None:
-    await message.answer(HELP)
 
 
 @router.message(Command("help"))

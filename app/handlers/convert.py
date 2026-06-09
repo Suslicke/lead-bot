@@ -30,6 +30,11 @@ def _lead_company_id(lead: dict) -> str | None:
     return lead.get("companyId") or (lead.get("company") or {}).get("id")
 
 
+def convertible(leads: list[dict]) -> list[dict]:
+    """Leads ready to become deals: engaged stage, not already linked to a company."""
+    return [l for l in leads if l.get("stage") in _CONVERTIBLE and not _lead_company_id(l)]
+
+
 @router.message(Command("convert"))
 async def convert_list(message: Message, twenty: TwentyClient) -> None:
     try:
@@ -37,7 +42,7 @@ async def convert_list(message: Message, twenty: TwentyClient) -> None:
     except Exception as e:  # noqa: BLE001
         await message.answer(f"⚠️ Couldn't load leads: {e}")
         return
-    ready = [l for l in leads if l.get("stage") in _CONVERTIBLE and not _lead_company_id(l)]
+    ready = convertible(leads)
     if not ready:
         await message.answer("No leads ready to convert (need stage Replied / Qualified / "
                              "Proposal and not yet linked to a company).")
