@@ -17,6 +17,8 @@ small model like `qwen2.5:7b`). Then set `.env`: `LLM_PROVIDER=ollama`, `OLLAMA_
 3. **Edit-before-create** — ✏️ inline buttons to fix niche/stage in the draft pre-save.
 4. **2GIS enrichment** — auto-fill name/reviews/rating from the link (Catalog API or scrape;
    fragile, anti-bot). MVP keeps manual.
+5. **Person on /convert** — currently skipped (2GIS = business, not a named human). Add when a
+   real contact name is captured, linking Opportunity.pointOfContact.
 
 ## Done (reference)
 - Twenty CRM live (`crm.suslicketeam.com`, netcup VPS); custom `Lead` object (15 fields:
@@ -28,7 +30,16 @@ small model like `qwen2.5:7b`). Then set `.env`: `LLM_PROVIDER=ollama`, `OLLAMA_
   niche/source read live off Twenty via the Metadata API and fed to both the LLM enum
   (`schema_with_options`) and `to_payload`; new options added from the phone (RU labels
   transliterated to ASCII VALUEs). `twenty.NICHE/SOURCE` kept as a seed/fallback. Verified
-  live (query + add + restore) with the bot's own key.
+  live (query + add + restore) with the bot's own key. Options mirror onto **Company** too.
+- **Lead language** — `language` MULTI_SELECT (RU/KK/EN) on the Lead, LLM-detected, in the schema
+  + `to_payload` (list, default `["RU"]`).
+- **LLM usage accounting** — `Extraction(fields, usage)`; `UsageStore` per-user/day counters;
+  `/usage`, `/llm set req|tok`, hard-stop on caps.
+- **Relational layer + `/convert`** — Twenty Company/Opportunity standard objects; `/convert`
+  promotes a replied/qualified Lead → Company (deduped) + Opportunity (deal), links the Lead,
+  forward-only stage bump. Multi-currency via `/currency` (`config.deal_currency`, default KZT).
+  Custom opp stages Qualified→Proposal→Negotiation→Won→Lost. Schema migrated via Metadata API.
+- **Button hub** — `/start`+`/menu` inline hub + `set_my_commands` (Telegram command menu).
 - Pluggable LLM (Strategy registry): `cloudflare`(default, Llama, no key) · `aigateway`
   (Claude/GPT/Gemini via CF AI Gateway) · `anthropic` · `ollama`.
 - Bot uses its **own** Twenty API key. CI/CD: push → GitHub Actions build → `ghcr.io/suslicke/lead-bot`

@@ -31,16 +31,22 @@ app/
   main.py        entrypoint — build deps, inject, wire routers (whitelist on each), start
   config.py      Settings (from env) + ConfigStore (runtime JSON: KPI goal, digest times, LLM caps)
   usage.py       UsageStore — per-user/day LLM token+request counters (data/usage.json)
-  twenty.py      TwentyClient (REST records + Metadata-API options) + field/value maps + to_payload
+  twenty.py      TwentyClient (Leads + Company/Opportunity records + Metadata-API options) + to_payload / to_company_payload / to_opportunity_payload
   llm.py         Extractor protocol + OpenAICompat/Anthropic extractors (return Extraction: fields + Usage) + provider registry + schema_with_options
-  reference.py   OptionsRegistry — live niche/source Select options cached from Twenty
+  reference.py   OptionsRegistry — live niche/source Select options cached from Twenty (mirrored onto Company)
   stats.py       StatsService — pipeline counts, KPI (new prospects today), digest text
   scheduler.py   DigestScheduler (APScheduler, reschedulable at runtime)
   filters.py     Whitelist (applied per router)
-  keyboards.py   confirm_kb / dup_kb
+  keyboards.py   confirm_kb / dup_kb / convert_kb
   timeutil.py    today-bounds (Asia/Almaty), ISO parse, progress bar
-  handlers/      common · capture · queries · kpi · digest · reference · usage
+  handlers/      menu · common · capture · queries · kpi · digest · reference · usage · convert
 ```
+
+- **menu.py** owns `/start` + `/menu` (an inline button **hub**: Today · Pipeline · Convert ·
+  Currency · Niches · Usage · Help) and the `menu:*` callbacks. Buttons re-run the same reads as
+  the typed commands (no logic dupe — e.g. it calls `convert.convertible()`) and post a *new*
+  message (not `edit_text`) so the hub stays put. `main` also calls `set_my_commands` so the full
+  command list shows in Telegram's blue "Menu".
 
 - **capture.py** is the core flow: text → `extractor.extract` (in a thread) → `to_payload`
   → **dedup** by `prospectLink` (then exact name) → preview with `confirm_kb` or `dup_kb`
@@ -49,7 +55,7 @@ app/
   rating, language) — it must NOT touch `stage`/`nextStep`/`notes` (the user's pipeline work).
   Before spending a call it checks the **per-user daily LLM cap** (`usage.over_limit`) and hard-stops;
   after a successful extract it records the call's token usage.
-- Commands: `/today` `/pipeline` `/leads <stage>` `/kpi [set N]` `/digest [list|add HH:MM|remove HH:MM|off]` `/niche [add <name>]` `/source [add <name>]` `/usage` `/llm set req|tok <n>` `/settings` `/start` `/help`.
+- Commands: `/start` `/menu` `/today` `/pipeline` `/leads <stage>` `/kpi [set N]` `/digest [list|add HH:MM|remove HH:MM|off]` `/niche [add <name>]` `/source [add <name>]` `/convert` `/currency [CODE]` `/usage` `/llm set req|tok <n>` `/settings` `/help`.
 
 ### Dynamic niche/source options (`app/reference.py` + Metadata API)
 
@@ -102,7 +108,8 @@ usage **after** a successful extract.
 
 ## Twenty integration (`app/twenty.py`)
 
-- REST: `POST/GET/PATCH /rest/leads`. Auth = Bearer **bot's own API key** (`TWENTY_API_KEY`).
+- REST: `POST/GET/PATCH /rest/{leads,companies,opportunities}`. Auth = Bearer **bot's own API
+  key** (`TWENTY_API_KEY`).
 - **Field/value mapping** (label → option VALUE) and `STAGE_*` live here — keep in sync with
   the Lead object in Twenty (16 fields). **Reserved names:** `Link`→`prospectLink`,
   `Address`→`addressText`. Select payloads use the option **value** (e.g. `"CONTACTED"`).
@@ -112,6 +119,34 @@ usage **after** a successful extract.
   from the business name / note / city (SYSTEM prompt). `_languages()` sanitises its guess into
   a valid list (tolerates a bare string / lowercase / unknown), always defaulting to `["RU"]`,
   so the REST payload is a list. `twenty.LANGUAGES` is the source set. Field id `41f2a057-…`.
+
+### Relational layer & `/convert` (`app/handlers/convert.py`)
+
+A cold **Lead** is a one-off prospect; once it engages you work it as a real **deal**. The CRM
+uses Twenty's standard objects for that: **Company** (the account), **Opportunity** (the deal,
+own pipeline + amount), with **Person** left for manual entry (2GIS gives a business, not a named
+human). `/convert` lists leads in stage `REPLIED/QUALIFIED/PROPOSAL` not yet linked, and on tap:
+
+1. **Dedup Company** by 2GIS link then name (`find_company`) — reuse the existing account or
+   create one from `to_company_payload` (firmographics: niche/source/language/hasWebsite/reviews/
+   rating/contact + the **composite re-shapes**: Lead `prospectLink` TEXT → Company LINKS
+   `{primaryLinkUrl,…}`; `city`+`addressText` → ADDRESS `{addressStreet1,addressCity,addressCountry}`).
+2. **Create Opportunity** (`to_opportunity_payload`) at stage `QUALIFIED`; `dealValue` NUMBER →
+   `amount` CURRENCY `{amountMicros: value*1_000_000, currencyCode}`.
+3. **Link** the Lead (`companyId`) and nudge its stage forward (never backward).
+
+- **Multi-currency:** the deal currency is `config.deal_currency` (default `KZT`, set via
+  **`/currency CODE`**, `twenty.CURRENCIES` = KZT/RUB/USD/EUR/GBP); each deal's currency is still
+  editable in the CRM. Amounts are stored ×1e6 (`amountMicros`).
+- **Option sync:** Company mirrors the Lead's `niche`/`source` Selects, so `/niche add` also adds
+  the option to **Company** with the *same VALUE* (`OptionsRegistry._mirror_to_company`) — else a
+  converted lead with a new niche would hit an unknown Company option. Custom **Opportunity stages**
+  are `Qualified→Proposal→Negotiation→Won→Lost` (replaced the stock New→…→Customer).
+- **Schema is migrated, not code-defined.** The Company/Opportunity custom fields + the relation +
+  the stage rewrite were applied **once via the Metadata API** on the live CRM (one field per
+  request; createOneField wraps `{field:{…}}`; relations use `relationCreationPayload`). All REST
+  shapes (LINKS/ADDRESS/CURRENCY/relation) were verified live with create/link/dedup round-trips.
+  Company object id `04c9d43d-…`, Opportunity `6c7e91b5-…`.
 
 ## CI/CD
 
