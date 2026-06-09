@@ -121,10 +121,15 @@ Makes the bot a **source** of leads, not just a logger. Two modes, both off when
   `osm_type/id` (e.g. `node/123`) is written to **`Lead.osmId`**, the dedup key that survives the
   `prospectLink` being swapped to a 2GIS URL. **Dedup** (`capture.find_duplicate`) now matches
   `osmId` → `prospectLink` → name (city-scoped), so a re-harvest and a 2GIS twin both collapse.
-- **Infra:** a **self-hosted Overpass** (`wiktorn/overpass-api`, Kazakhstan extract) in
-  `docker-compose.yml`, bound to `127.0.0.1`; `OVERPASS_URL` points the bot at its
-  `/api/interpreter`. Chosen over public Overpass (rate limits). Not Nominatim — enrichment matches
-  by name+area via Overpass, so one instance serves both modes.
+- **Infra:** a **self-hosted Overpass** (`wiktorn/overpass-api`, Kazakhstan extract) runs on the
+  **netcup-observ** box at `/opt/overpass` (NOT the CRM box — it's RAM-tight, no swap). The bot
+  reaches it at `127.0.0.1:12347` via a **forward-only SSH tunnel** (systemd `overpass-tunnel.service`
+  on the CRM host → observ `127.0.0.1:12347`, key restricted `permitopen=127.0.0.1:12347`). So
+  `OVERPASS_URL=http://127.0.0.1:12347/api/interpreter` even though Overpass is on another host.
+  Chosen over public Overpass (rate limits) and a public TLS endpoint (no nginx/cert on observ; the
+  tunnel needs no firewall changes). Not Nominatim — enrichment matches by name+area via Overpass,
+  so one instance serves both modes. (Geofabrik dropped `.osm.bz2` for KZ → the `.pbf` was converted
+  to `.osm.bz2` with `osmium` and imported via `file://`; `OVERPASS_COMPRESSION=gz`, not `gzip`.)
 - **Prod prerequisites (Metadata API, one-off on the live CRM — see website repo's CRM section):**
   add a **`osmId` TEXT field** to the Lead object and an **`OSM` option** to the `source` Select
   (and mirror it onto Company), *before* deploying — Twenty rejects unknown fields on `/rest/leads`.
